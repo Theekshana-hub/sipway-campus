@@ -5,7 +5,7 @@ if (!isset($conn) || $conn === null) {
     die("Database connection failed. Please check db.php file.");
 }
 $isLoggedIn = isset($_SESSION['student_id']);
-// ---------- Defaults (guest state) ----------
+
 $studentId       = null;
 $studentName     = '';
 $studentLanguage = 'en';

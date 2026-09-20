@@ -22,7 +22,7 @@ set_exception_handler(function ($e) {
 
 require_once 'db.php';
 
-// Check connection
+
 if (!isset($conn) || !$conn) {
     echo json_encode(['success' => false, 'message' => 'Database connection eka hadanna baa una (check db.php)']);
     exit;
@@ -32,13 +32,13 @@ if ($conn->connect_error) {
     exit;
 }
 
-// Set charset
+
 $conn->set_charset('utf8mb4');
 
 $startDate = trim($_GET['start_date'] ?? '');
 $endDate   = trim($_GET['end_date'] ?? '');
 
-// Validate dates
+
 function isValidDate($d) {
     $dt = DateTime::createFromFormat('Y-m-d', $d);
     return $dt && $dt->format('Y-m-d') === $d;
