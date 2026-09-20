@@ -4,7 +4,7 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 include 'db.php';
 $isLoggedIn = isset($_SESSION['student_id']);
-// ---------- Defaults (guest) ----------
+
 $fullName         = 'Guest';
 $studentId        = 0;
 $firstName        = 'Guest';
@@ -45,7 +45,6 @@ if ($isLoggedIn) {
     }
 }
 
-// ===== REGISTER GUIDE VIDEO (for How to Register modal) =====
 $registerVideo = null;
 
 if (isset($conn) && $conn) {
@@ -68,7 +67,7 @@ if (isset($conn) && $conn) {
         if ($regRow['source_type'] === 'link' && !empty($regRow['video_url'])) {
             $url = trim($regRow['video_url']);
 
-            // YouTube
+          
             if (preg_match(
                 '~(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,})~i',
                 $url,
@@ -77,12 +76,12 @@ if (isset($conn) && $conn) {
                 $registerVideo['player_type'] = 'youtube';
                 $registerVideo['player_src']  = 'https://www.youtube.com/embed/' . $m[1];
             }
-            // Vimeo
+            
             elseif (preg_match('~vimeo\.com/(?:video/)?(\d+)~i', $url, $m)) {
                 $registerVideo['player_type'] = 'vimeo';
                 $registerVideo['player_src']  = 'https://player.vimeo.com/video/' . $m[1];
             }
-            // Direct video URL
+           
             else {
                 $registerVideo['player_type'] = 'direct';
                 $registerVideo['player_src']  = $url;
@@ -98,7 +97,7 @@ $registerVideoJs = json_encode(
     JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE
 );
 
-// Language
+
 $langMeta = [
     'en' => ['code' => 'gb', 'label' => 'English'],
     'de' => ['code' => 'de', 'label' => 'German'],
@@ -1121,7 +1120,7 @@ a { color: inherit; text-decoration: none; }
 
   authOverlay.addEventListener('click', (e) => { if (e.target === authOverlay) closeAuthModal(); });
 
-  // ========== Login / Register form logic ==========
+ 
   (function(){
     document.getElementById('gpGoRegister').addEventListener('click', () => openAuthModal(true));
     document.getElementById('gpGoLogin').addEventListener('click', () => openAuthModal(false));
@@ -1150,7 +1149,7 @@ a { color: inherit; text-decoration: none; }
       });
     });
 
-    // Language dropdown
+    
     const langSelect = document.getElementById('gpLangSelect');
     const langTrigger = document.getElementById('gpLangTrigger');
     const langOptions = document.getElementById('gpLangOptions');
@@ -1278,7 +1277,7 @@ a { color: inherit; text-decoration: none; }
       }
     });
 
-    // Register
+   
     const regName = document.getElementById('gpRegName');
     const regEmail = document.getElementById('gpRegEmail');
     const regMobile = document.getElementById('gpRegMobile');
@@ -1374,7 +1373,7 @@ a { color: inherit; text-decoration: none; }
     });
   })();
 
-  // Sidebar
+  
   const sidebar = document.getElementById('sidebar');
   const burgerBtn = document.getElementById('burgerBtn');
   const backdrop = document.getElementById('backdrop');
@@ -1385,7 +1384,7 @@ a { color: inherit; text-decoration: none; }
   });
   backdrop.addEventListener('click', closeSidebar);
 
-  // User dropdown
+ 
   const userMenu = document.getElementById('userMenu');
   if (userMenu) {
     const userDropdown = document.getElementById('userDropdown');
@@ -1396,7 +1395,7 @@ a { color: inherit; text-decoration: none; }
     document.addEventListener('click', () => userDropdown.classList.remove('show'));
   }
 
-  // Protect auth-required links
+ 
   document.querySelectorAll('[data-requires-auth="1"]').forEach(link => {
     link.addEventListener('click', function(e) {
       if (!IS_LOGGED_IN) {
@@ -1406,7 +1405,7 @@ a { color: inherit; text-decoration: none; }
     });
   });
 
-  // FAQ accordion
+ 
   document.querySelectorAll('#faqList .faq-item').forEach(item => {
     item.querySelector('.faq-q').addEventListener('click', () => {
       const wasOpen = item.classList.contains('open');
@@ -1464,7 +1463,6 @@ a { color: inherit; text-decoration: none; }
     }
   }
 
-  // ==================== HOW TO REGISTER VIDEO MODAL ====================
   const REGISTER_VIDEO = <?php echo $registerVideoJs ?: 'null'; ?>;
 
   const howtoOverlay = document.getElementById('howtoModalOverlay');

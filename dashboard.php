@@ -1,23 +1,59 @@
 <?php
+
 session_start();
 
-// ==================== NO-CACHE HEADERS (prevent stale stats on back/forward) ====================
+$needsMobile = !isset($_SESSION['gate_mobile']) || empty($_SESSION['gate_mobile']);
+
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_mobile'])) {
+    $mobile = preg_replace('/\D/', '', trim($_POST['gate_mobile']));
+    
+    if (preg_match('/^0\d{9}$/', $mobile)) {
+        $_SESSION['gate_mobile'] = $mobile;
+        $needsMobile = false;
+
+       
+        require_once 'db.php';   
+        
+        if (isset($conn) && $conn) {
+            $ip  = $_SERVER['REMOTE_ADDR'] ?? null;
+            $ua  = $_SERVER['HTTP_USER_AGENT'] ?? null;
+            
+            $stmt = $conn->prepare("INSERT INTO mobile_gate_logs (mobile, ip_address, user_agent) VALUES (?, ?, ?)");
+            $stmt->bind_param("sss", $mobile, $ip, $ua);
+            $stmt->execute();
+            $stmt->close();
+        }
+       
+
+        
+        header('Location: ' . $_SERVER['PHP_SELF']);
+        exit;
+    }
+}
+
+$reminderLockFile = __DIR__ . '/reminder_lock.txt';
+$now = time();
+$lastRun = file_exists($reminderLockFile) ? (int)file_get_contents($reminderLockFile) : 0;
+
+if ($now - $lastRun >= 300) {  
+    file_put_contents($reminderLockFile, $now);
+    $phpPath    = 'C:\\wamp64\\bin\\php\\php8.3.14\\php.exe';
+    $scriptPath = __DIR__ . '\\send-session-reminders.php';
+    pclose(popen("start /B \"\" \"$phpPath\" \"$scriptPath\"", "r"));
+}
+
 header("Cache-Control: no-cache, no-store, must-revalidate");
 header("Pragma: no-cache");
 header("Expires: 0");
-// =====================
 
-// ==================== DATABASE CONNECTION ====================
 require_once 'db.php';
 
 if (!isset($conn) || $conn === null) {
     die("Database connection failed. Please check db.php file.");
 }
-// ============================================================
 
 $isLoggedIn = isset($_SESSION['student_id']);
 
-// ---------- Defaults (guest state) ----------
 $studentId        = null;
 $studentName      = '';
 $studentLanguage  = 'en';
@@ -28,9 +64,8 @@ $mySessions       = [];
 $loggedBookingIds = [];
 $hasActivePackage = false;
 $activePackageSubject = null;
-$activePackageType    = null;   // ★ මෙතනට add කරන්න
+$activePackageType    = null;   
 
-// ==================== LOGGED-IN: FETCH STUDENT DATA ====================
 if ($isLoggedIn) {
     $studentId   = $_SESSION['student_id'];
     $studentName = $_SESSION['student_name'] ?? '';
@@ -45,7 +80,6 @@ if ($isLoggedIn) {
         $studentLanguage = $row['language'] ?: 'en';
         $studentPhoto    = $row['profile_photo'] ?: null;
     } else {
-        // Session points at a student that no longer exists -> fall back to guest view
         session_destroy();
         session_start();
         $isLoggedIn = false;
@@ -61,7 +95,6 @@ if ($isLoggedIn) {
 $studentNameJs     = json_encode($studentName);
 $studentLanguageJs = $isLoggedIn ? json_encode($studentLanguage) : 'null';
 
-// ===== Language Flag (Image-based - works in Chrome + Firefox) =====
 $langMeta = [
     'en' => ['flag' => 'https://flagcdn.com/w40/gb.png', 'label' => 'English'],
     'de' => ['flag' => 'https://flagcdn.com/w40/de.png', 'label' => 'German'],
@@ -83,7 +116,6 @@ if (!isset($langMeta[$currentLang])) {
 $langFlag  = $langMeta[$currentLang]['flag'];
 $langLabel = $langMeta[$currentLang]['label'];
 
-// Build safe photo URL
 $photoUrl = null;
 if ($isLoggedIn && $studentPhoto) {
     $photoPath = $studentPhoto;
@@ -92,9 +124,7 @@ if ($isLoggedIn && $studentPhoto) {
     }
 }
 
-// ==================== LOGGED-IN: SESSIONS / PACKAGE DATA ====================
 if ($isLoggedIn) {
-    // ---- Accepted sessions ----
     $stmt2 = $conn->prepare("
         SELECT b.id, b.package_id, b.lecturer_id, l.full_name AS lecturer_name,
                b.session_date, b.session_time, b.meeting_link
@@ -111,7 +141,7 @@ if ($isLoggedIn) {
     }
     $stmt2->close();
 
-    // ---- Already-logged booking ids ----
+  
     $stmt3 = $conn->prepare("SELECT booking_id FROM session_logs WHERE student_id = ? AND booking_id IS NOT NULL");
     $stmt3->bind_param("i", $studentId);
     $stmt3->execute();
@@ -121,10 +151,7 @@ if ($isLoggedIn) {
     }
     $stmt3->close();
 
-    // ---- Active package check (+ its package_name, matched against lecturers.subject
-    //      so the calendar / live-now list on this dashboard can be locked to the
-    //      subject implied by the active package, e.g. package_name = "IELTS" ->
-    //      only lecturers/slots with subject = "IELTS") ----
+   
 $stmtPkg = $conn->prepare("
     SELECT ap.id, ap.package_name, ap.package_type, p.package_name AS pkg_name
     FROM activated_packages ap
@@ -156,10 +183,8 @@ $stmtPkg->bind_param("i", $studentId);
     }
     $stmtPkg->close();
 }
-// Lowercased package_name of the active package, matched against lecturer subject in JS. Null if none.
 $activePackageSubjectJs = json_encode($activePackageSubject !== null && $activePackageSubject !== '' ? strtolower(trim($activePackageSubject)) : null);
 
-// ==================== BOOKED SESSIONS FOR LIVE-JOIN GATING ====================
 $bookedSessionsForJs = array_map(function ($s) {
     return [
         'lecturer_id' => (int)$s['lecturer_id'],
@@ -169,14 +194,12 @@ $bookedSessionsForJs = array_map(function ($s) {
 }, $mySessions);
 $bookedSessionsJs = json_encode($bookedSessionsForJs);
 
-// ==================== REAL STATS FROM DATABASE ====================
 $sessionsCompleted = 0;
 $hoursLearned      = 0;
 $achievements      = 0;
 
 if ($isLoggedIn) {
 
-    // 1. Sessions Completed (from session_logs)
     $stmtCompleted = $conn->prepare("SELECT COUNT(*) AS total FROM session_logs WHERE student_id = ?");
     $stmtCompleted->bind_param("i", $studentId);
     $stmtCompleted->execute();
@@ -186,23 +209,20 @@ if ($isLoggedIn) {
     }
     $stmtCompleted->close();
 
-    // 2. Hours Learned (1 hour per completed session)
-    // Change this later if you store actual duration
+   
     $hoursLearned = $sessionsCompleted;
 
-    // 3. Achievements
-    if ($sessionsCompleted >= 1)  $achievements += 1;   // First session
-    if ($sessionsCompleted >= 5)  $achievements += 1;   // 5 sessions
-    if ($sessionsCompleted >= 10) $achievements += 1;   // 10 sessions
-    if ($sessionsCompleted >= 20) $achievements += 1;   // 20 sessions
-    if ($hasActivePackage)       $achievements += 1;   // Active package
+   
+    if ($sessionsCompleted >= 1)  $achievements += 1;   
+    if ($sessionsCompleted >= 5)  $achievements += 1;   
+    if ($sessionsCompleted >= 10) $achievements += 1;   
+    if ($sessionsCompleted >= 20) $achievements += 1;   
+    if ($hasActivePackage)       $achievements += 1;    
 }
 
 $upcomingSessions = count($mySessions);
 
-// ===== REGISTER GUIDE VIDEO (for How to Register modal) =====
-// Load the latest active guide before closing the DB connection.
-$registerVideo = null; // source_type, player_type, player_src, title
+$registerVideo = null;
 
 $regRes = $conn->query("
     SELECT id, title, source_type, video_path, video_url
@@ -223,7 +243,6 @@ if ($regRes && $regRow = $regRes->fetch_assoc()) {
     if ($regRow['source_type'] === 'link' && !empty($regRow['video_url'])) {
         $url = trim($regRow['video_url']);
 
-        // YouTube: watch, embed, shorts and youtu.be links
         if (preg_match(
             '~(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,})~i',
             $url,
@@ -232,12 +251,11 @@ if ($regRes && $regRow = $regRes->fetch_assoc()) {
             $registerVideo['player_type'] = 'youtube';
             $registerVideo['player_src']  = 'https://www.youtube.com/embed/' . $m[1];
         }
-        // Vimeo
+        
         elseif (preg_match('~vimeo\.com/(?:video/)?(\d+)~i', $url, $m)) {
             $registerVideo['player_type'] = 'vimeo';
             $registerVideo['player_src']  = 'https://player.vimeo.com/video/' . $m[1];
         }
-        // Direct video URL
         else {
             $registerVideo['player_type'] = 'direct';
             $registerVideo['player_src']  = $url;
@@ -294,7 +312,6 @@ $conn->close();
   --ease: cubic-bezier(.4,0,.2,1);
 }
 
-/* ========== SIDEBAR (lightened + white text) ========== */
 .sidebar {
   width: 260px;
   flex-shrink: 0;
@@ -2267,6 +2284,86 @@ $conn->close();
     30% { transform: translateY(-6px); opacity: 1; }
   }
 
+  /* ========== MOBILE GATE POPUP ========== */
+  .mobile-gate-overlay {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 12, 41, 0.92);
+    backdrop-filter: blur(12px);
+    z-index: 9999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+  }
+  .mobile-gate-box {
+    background: #fff;
+    border-radius: 24px;
+    width: 100%;
+    max-width: 420px;
+    padding: 36px 28px;
+    box-shadow: 0 40px 90px -20px rgba(0,0,0,0.5);
+    text-align: center;
+    animation: scaleIn .35s cubic-bezier(.34,1.56,.64,1);
+  }
+  .mobile-gate-box h2 {
+    font-size: 22px;
+    font-weight: 800;
+    color: #1e1b4b;
+    margin: 0 0 8px 0;
+  }
+  .mobile-gate-box p {
+    font-size: 14px;
+    color: #6b7280;
+    margin: 0 0 24px 0;
+    line-height: 1.5;
+  }
+  .mobile-gate-input {
+    width: 100%;
+    padding: 14px 16px;
+    border: 2px solid #e9e5f5;
+    border-radius: 12px;
+    font-size: 16px;
+    font-family: inherit;
+    text-align: center;
+    letter-spacing: 1px;
+    outline: none;
+    transition: border-color .2s, box-shadow .2s;
+    margin-bottom: 8px;
+  }
+  .mobile-gate-input:focus {
+    border-color: #a855f7;
+    box-shadow: 0 0 0 4px rgba(168,85,247,0.15);
+  }
+  .mobile-gate-error {
+    font-size: 13px;
+    color: #ef4444;
+    font-weight: 600;
+    margin-bottom: 14px;
+    min-height: 20px;
+  }
+  .mobile-gate-btn {
+    width: 100%;
+    padding: 15px;
+    border: none;
+    border-radius: 12px;
+    background: linear-gradient(135deg, #a855f7, #ec4899);
+    color: #fff;
+    font-weight: 800;
+    font-size: 15px;
+    cursor: pointer;
+    box-shadow: 0 10px 24px -6px rgba(168,85,247,0.45);
+    transition: filter .2s, transform .15s;
+  }
+  .mobile-gate-btn:hover {
+    filter: brightness(1.06);
+    transform: translateY(-1px);
+  }
+  .mobile-gate-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
+
   /* ========== RESPONSIVE ========== */
   @media (max-width: 1100px) {
     .grid { grid-template-columns: 1fr 1fr; }
@@ -2330,11 +2427,59 @@ $conn->close();
     object-fit: contain;
     border-radius: 10px;
 }
+/* ===== Language dropdown – admin enable/disable ===== */
+.gp-lang-option.disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+  pointer-events: none;
+  background: #f3f4f6 !important;
+  color: #9ca3af !important;
+}
+.gp-lang-option.disabled .gp-lang-tick {
+  display: none;
+}
+.gp-lang-option.enabled:hover {
+  background: var(--purple-soft);
+}
 </style>
 </head>
 <body>
 
-<!-- ==================== TOPBAR ==================== -->
+<?php if ($needsMobile): ?>
+<div class="mobile-gate-overlay" id="mobileGateOverlay">
+  <div class="mobile-gate-box">
+    <h2>📱 Mobile Number</h2>
+    <p>Dashboard එකට යන්න කලින් ඔබේ mobile number එක ඇතුළත් කරන්න.<br>
+    (10 digit number – 07XXXXXXXX)</p>
+    <form method="POST" action="" id="mobileGateForm">
+      <input type="tel" name="gate_mobile" id="gateMobileInput" class="mobile-gate-input"
+             placeholder="07XXXXXXXX" maxlength="10" inputmode="numeric" autocomplete="tel" required>
+      <div class="mobile-gate-error" id="gateMobileError"></div>
+      <button type="submit" class="mobile-gate-btn" id="gateMobileBtn">Continue to Dashboard →</button>
+    </form>
+  </div>
+</div>
+<script>
+  document.getElementById('mobileGateForm').addEventListener('submit', function(e) {
+    const input = document.getElementById('gateMobileInput');
+    const err = document.getElementById('gateMobileError');
+    const val = input.value.replace(/\D/g, '');
+    if (!/^0\d{9}$/.test(val)) {
+      e.preventDefault();
+      err.textContent = '⚠ 10 digit mobile number එකක් දෙන්න (0XXXXXXXXX)';
+      input.focus();
+      return false;
+    }
+    err.textContent = '';
+    document.getElementById('gateMobileBtn').disabled = true;
+    document.getElementById('gateMobileBtn').textContent = 'Please wait...';
+  });
+  document.getElementById('gateMobileInput').addEventListener('input', function() {
+    this.value = this.value.replace(/\D/g, '').slice(0, 10);
+  });
+</script>
+<?php else: ?>
+
 <header class="topbar">
   <button class="burger" id="burgerBtn" aria-label="Menu">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
@@ -2343,7 +2488,6 @@ $conn->close();
     <img src="images/logo.png" alt="Lingora Logo" class="logo-image">
     <span></span>
 </a>
-
   <?php if ($isLoggedIn): ?>
   <div class="lang-nav-badge">
     <div class="lang-flag-big"><img src="<?php echo htmlspecialchars($langFlag); ?>" alt="<?php echo htmlspecialchars($langLabel); ?>"></div>
@@ -2384,7 +2528,6 @@ $conn->close();
 <div class="backdrop" id="backdrop"></div>
 
 <div class="shell">
-  <!-- ==================== SIDEBAR ==================== -->
 <aside class="sidebar" id="sidebar">
   <a href="index.php" class="nav-item active">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
@@ -2392,25 +2535,21 @@ $conn->close();
   </a>
   
 
-  <!-- Packages = guest ටත් open (data-requires-auth නැති) -->
   <a href="packages.php" class="nav-item">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/></svg>
     Packages
   </a>
 
-  <!-- My Progress = login අවශ්‍ය -->
   <a href="session_progress.php" class="nav-item" >
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M18 20V10M12 20V4M6 20v-6"/></svg>
     My Progress
   </a>
 
-  <!-- Practice AI = login අවශ්‍ය -->
   <a href="practice-ai-video.php" class="nav-item">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="5 3 19 12 5 21 5 3"/></svg>
     Practice with AI Video
     <span class="badge-new">New</span>
   </a>
-    <!-- ========== NEW: Vocabulary Practice ========== -->
  
 <a href="student_chat.php" class="nav-item">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
@@ -2420,7 +2559,6 @@ $conn->close();
 </a>
   <div class="side-divider"></div>
 
-  <!-- FAQ / Lecturer = guest ටත් open -->
   <a href="faq-support.php" class="nav-item">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
     FAQs & Support
@@ -2431,7 +2569,6 @@ $conn->close();
   </a>
 
 
-  <!-- ========== NEW: How to Register ========== -->
   <a href="javascript:void(0)" class="nav-item" id="howToRegisterBtn">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
       <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
@@ -2443,12 +2580,10 @@ $conn->close();
     How to Register
   </a>
 
-  <!-- side-illustration + help card එලෙසම තියන්න -->
   
 
 
     <div class="side-illustration">
-      <!-- Decorative SVG (graduation + books + globe style) -->
       <svg viewBox="0 0 200 180" fill="none" xmlns="http://www.w3.org/2000/svg" style="max-width:170px;margin:0 auto;display:block;">
         <ellipse cx="100" cy="160" rx="70" ry="12" fill="rgba(168,85,247,0.15)"/>
         <rect x="40" y="100" width="50" height="45" rx="4" fill="#7c3aed" opacity="0.7"/>
@@ -2471,14 +2606,13 @@ $conn->close();
     
   </aside>
 
-  <!-- ==================== MAIN CONTENT ==================== -->
   <main class="main">
     <div class="page-header animate-up">
       <div>
         <h1 class="page-title">Dashboard</h1>
         <p class="page-subtitle">Welcome back! Keep learning and improving every day. 👏</p>
       </div>
-      <!-- Decorative graduation + books illustration (top-right) -->
+      
       <svg class="page-deco" viewBox="0 0 180 140" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="90" y="70" width="55" height="40" rx="4" fill="#a78bfa"/>
         <rect x="100" y="60" width="55" height="40" rx="4" fill="#8b5cf6"/>
@@ -2498,7 +2632,7 @@ $conn->close();
     </div>
     <?php endif; ?>
 
-    <!-- Live Now Panel -->
+    
     <div class="panel animate-up delay-1" id="liveNowPanel" style="display:none;">
       <h2>
         <span class="live-dot" style="width:10px;height:10px;"></span>
@@ -2508,9 +2642,9 @@ $conn->close();
     </div>
 
     <div class="grid">
-      <!-- LEFT COLUMN -->
+     
       <div>
-        <!-- Let's Have a Talk / My Booked Sessions -->
+       
         <div class="panel animate-up delay-1" style="margin-bottom:22px;">
           <h2>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
@@ -2824,7 +2958,6 @@ $conn->close();
 
 <div class="gp-toast" id="gpToast"></div>
 
-<!-- ==================== FREE CHATBOT ==================== -->
 <button class="chatbot-toggle" id="chatbotToggle" aria-label="Open chat">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
@@ -2865,7 +2998,6 @@ $conn->close();
     String(_nowLocal.getMonth() + 1).padStart(2, '0') + '-' +
     String(_nowLocal.getDate()).padStart(2, '0');
 
-  // Auth modal helpers
   const authOverlay = document.getElementById('authModalOverlay');
   const loginCard = document.getElementById('gpLoginCard');
   const registerCard = document.getElementById('gpRegisterCard');
@@ -2901,7 +3033,6 @@ $conn->close();
     });
   });
 
-  // ==================== HOW TO REGISTER VIDEO MODAL ====================
   const REGISTER_VIDEO = <?php echo $registerVideoJs ?: 'null'; ?>;
 
   const howtoOverlay = document.getElementById('howtoModalOverlay');
@@ -2979,7 +3110,6 @@ $conn->close();
     }
   });
 
-  // ==================== LOGIN / REGISTER FORM LOGIC ====================
   (function(){
     document.getElementById('gpGoRegister').addEventListener('click', () => openAuthModal(true));
     document.getElementById('gpGoLogin').addEventListener('click', () => openAuthModal(false));
@@ -3033,13 +3163,78 @@ $conn->close();
       en:'GB', zh:'CN', ja:'JP', fr:'FR', hi:'IN', ru:'RU', ar:'SA', ta:'IN', si:'LK', de:'DE', it:'IT'
     };
 
-    function resolveFlagCode(lang) {
-      let code = (lang.flag || '').toString().trim().toUpperCase();
-      if (code && FLAG_SVGS[code]) return code;
-      const langCode = normalizeCode(lang.code);
-      if (LANG_TO_FLAG[langCode] && FLAG_SVGS[LANG_TO_FLAG[langCode]]) return LANG_TO_FLAG[langCode];
-      return 'DEFAULT';
-    }
+function resolveFlagCode(lang) {
+  let code = (lang.flag || lang.flag_code || '').toString().trim().toUpperCase();
+  if (code && FLAG_SVGS[code]) return code;
+  const langCode = normalizeCode(lang.code);
+  if (LANG_TO_FLAG[langCode] && FLAG_SVGS[LANG_TO_FLAG[langCode]]) return LANG_TO_FLAG[langCode];
+  return 'DEFAULT';
+}
+
+function buildLangOption(lang, selectDefault) {
+  const flagCode  = resolveFlagCode(lang);
+  const codeNorm  = normalizeCode(lang.code);
+  const isEnabled = lang.is_enabled === true || lang.is_enabled === 1;
+
+  const li = document.createElement('li');
+  li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '') + (isEnabled ? ' enabled' : ' disabled');
+  li.setAttribute('role', 'option');
+  li.setAttribute('aria-selected', selectDefault ? 'true' : 'false');
+  li.setAttribute('aria-disabled', isEnabled ? 'false' : 'true');
+  li.dataset.value   = codeNorm;
+  li.dataset.flag    = flagCode;
+  li.dataset.label   = lang.label;
+  li.dataset.enabled = isEnabled ? '1' : '0';
+
+  li.innerHTML =
+    '<span class="gp-lang-option-left">' +
+      flagImgHtml(flagCode) +
+      '<span>' + lang.label + (isEnabled ? '' : ' (disabled)') + '</span>' +
+    '</span>' +
+    '<svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+
+  if (isEnabled) {
+    li.addEventListener('click', () => {
+      selectLangOption(li);
+      closeLangDropdown();
+    });
+  }
+
+  return li;
+}
+
+function loadLanguages() {
+  fetch('get_languages.php')
+    .then(res => res.json())
+    .then(data => {
+      langOptions.innerHTML = '';
+
+      if (!data.success || !data.languages || data.languages.length === 0) {
+        langOptions.innerHTML = '<li class="gp-lang-option-loading">No languages found.</li>';
+        langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
+        regLanguage.value = 'en';
+        return;
+      }
+
+      const enabledList = data.languages.filter(l => l.is_enabled === true || l.is_enabled === 1);
+      const defaultLang = enabledList.find(l => normalizeCode(l.code) === 'en')
+                       || enabledList[0]
+                       || data.languages[0];
+
+      data.languages.forEach(lang => {
+        const isDefault = normalizeCode(lang.code) === normalizeCode(defaultLang.code);
+        langOptions.appendChild(buildLangOption(lang, isDefault));
+      });
+
+      langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) + '<span>' + defaultLang.label + '</span>';
+      regLanguage.value = normalizeCode(defaultLang.code);
+    })
+    .catch(() => {
+      langOptions.innerHTML = '<li class="gp-lang-option-loading">Could not load languages.</li>';
+      langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
+      regLanguage.value = 'en';
+    });
+}
     function flagImgHtml(code) {
       const key = (code || 'DEFAULT').toUpperCase().trim();
       const inner = FLAG_SVGS[key] || FLAG_SVGS.DEFAULT;
@@ -3051,43 +3246,68 @@ $conn->close();
     document.addEventListener('click', (e) => { if (!langSelect.contains(e.target)) closeLangDropdown(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLangDropdown(); });
 
-    function selectLangOption(li){
-      langOptions.querySelectorAll('.gp-lang-option').forEach(o => { o.classList.remove('selected'); o.setAttribute('aria-selected','false'); });
-      li.classList.add('selected'); li.setAttribute('aria-selected','true');
+      function selectLangOption(li){
+      langOptions.querySelectorAll('.gp-lang-option').forEach(o => {
+        o.classList.remove('selected');
+        o.setAttribute('aria-selected', 'false');
+      });
+      li.classList.add('selected');
+      li.setAttribute('aria-selected', 'true');
       langCurrent.innerHTML = flagImgHtml(li.dataset.flag) + '<span>' + li.dataset.label + '</span>';
       regLanguage.value = normalizeCode(li.dataset.value);
     }
+
     function buildLangOption(lang, selectDefault){
       const flagCode = resolveFlagCode(lang);
       const codeNorm = normalizeCode(lang.code);
+
       const li = document.createElement('li');
       li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '');
-      li.setAttribute('role','option');
+      li.setAttribute('role', 'option');
       li.setAttribute('aria-selected', selectDefault ? 'true' : 'false');
       li.dataset.value = codeNorm;
-      li.dataset.flag = flagCode;
+      li.dataset.flag  = flagCode;
       li.dataset.label = lang.label;
-      li.innerHTML = '<span class="gp-lang-option-left">' + flagImgHtml(flagCode) + '<span>' + lang.label + '</span></span><svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
-      li.addEventListener('click', () => { selectLangOption(li); closeLangDropdown(); });
+
+      li.innerHTML =
+        '<span class="gp-lang-option-left">' +
+          flagImgHtml(flagCode) +
+          '<span>' + lang.label + '</span>' +
+        '</span>' +
+        '<svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
+
+      li.addEventListener('click', () => {
+        selectLangOption(li);
+        closeLangDropdown();
+      });
+
       return li;
     }
+
     function loadLanguages(){
       fetch('get_languages.php')
         .then(res => res.json())
         .then(data => {
           langOptions.innerHTML = '';
+
           if (!data.success || !data.languages || data.languages.length === 0) {
             langOptions.innerHTML = '<li class="gp-lang-option-loading">No languages found.</li>';
             langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
             regLanguage.value = 'en';
             return;
           }
-          const defaultLang = data.languages.find(l => normalizeCode(l.code) === 'en') || data.languages[0];
+
+          const defaultLang =
+            data.languages.find(l => normalizeCode(l.code) === 'en') ||
+            data.languages[0];
+
           data.languages.forEach(lang => {
             const isDefault = normalizeCode(lang.code) === normalizeCode(defaultLang.code);
             langOptions.appendChild(buildLangOption(lang, isDefault));
           });
-          langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) + '<span>' + defaultLang.label + '</span>';
+
+          langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) +
+                                  '<span>' + defaultLang.label + '</span>';
           regLanguage.value = normalizeCode(defaultLang.code);
         })
         .catch(() => {
@@ -3227,7 +3447,6 @@ $conn->close();
     });
   })();
 
-  // ==================== DASHBOARD SCRIPT ====================
   const LANG_MAP = {
     en:{flag:'https://flagcdn.com/w20/gb.png', label:'English'},
     de:{flag:'https://flagcdn.com/w20/de.png', label:'German'},
@@ -3841,7 +4060,6 @@ $conn->close();
     setInterval(refreshSelectedDateSlotsSilently, 15000);
   })();
 
-  // ==================== FREE CHATBOT ====================
   (function(){
     const toggleBtn = document.getElementById('chatbotToggle');
     const chatWindow = document.getElementById('chatbotWindow');
@@ -3957,3 +4175,4 @@ $conn->close();
 
 </body>
 </html>
+<?php endif; ?>

@@ -2,13 +2,12 @@
 session_start();
 header('Content-Type: application/json');
 
-// ==================== AUTH CHECK ====================
 if (!isset($_SESSION['lecturer_id'])) {
     echo json_encode(['success' => false, 'message' => 'Session expire velalu. Please login again.']);
     exit();
 }
 
-// ==================== DATABASE CONNECTION ====================
+
 require_once 'db.php';
 
 if (!isset($conn) || $conn === null) {
@@ -18,7 +17,7 @@ if (!isset($conn) || $conn === null) {
 
 $lecturerId = $_SESSION['lecturer_id'];
 
-// ==================== READ INPUT ====================
+
 $input  = json_decode(file_get_contents('php://input'), true);
 $slotId = isset($input['slot_id']) ? (int)$input['slot_id'] : 0;
 
@@ -27,7 +26,7 @@ if ($slotId <= 0) {
     exit();
 }
 
-// ==================== CONFIRM SLOT BELONGS TO THIS LECTURER ====================
+
 $stmt = $conn->prepare("SELECT id, status FROM lecturer_availability WHERE id = ? AND lecturer_id = ? LIMIT 1");
 $stmt->bind_param("ii", $slotId, $lecturerId);
 $stmt->execute();
@@ -41,7 +40,6 @@ if (!$slot) {
     exit();
 }
 
-// ==================== SET STATUS = ENDED ====================
 $update = $conn->prepare("
     UPDATE lecturer_availability
     SET status = 'ended', ended_at = NOW()

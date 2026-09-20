@@ -2612,7 +2612,7 @@ $conn->close();
         <h1 class="page-title">Dashboard</h1>
         <p class="page-subtitle">Welcome back! Keep learning and improving every day. 👏</p>
       </div>
-      <!-- Decorative graduation + books illustration (top-right) -->
+      
       <svg class="page-deco" viewBox="0 0 180 140" fill="none" xmlns="http://www.w3.org/2000/svg">
         <rect x="90" y="70" width="55" height="40" rx="4" fill="#a78bfa"/>
         <rect x="100" y="60" width="55" height="40" rx="4" fill="#8b5cf6"/>
@@ -2632,7 +2632,7 @@ $conn->close();
     </div>
     <?php endif; ?>
 
-    <!-- Live Now Panel -->
+    
     <div class="panel animate-up delay-1" id="liveNowPanel" style="display:none;">
       <h2>
         <span class="live-dot" style="width:10px;height:10px;"></span>
@@ -2642,9 +2642,9 @@ $conn->close();
     </div>
 
     <div class="grid">
-      <!-- LEFT COLUMN -->
+     
       <div>
-        <!-- Let's Have a Talk / My Booked Sessions -->
+       
         <div class="panel animate-up delay-1" style="margin-bottom:22px;">
           <h2>
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
