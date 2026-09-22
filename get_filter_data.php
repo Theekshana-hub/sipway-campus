@@ -53,12 +53,7 @@ if ($startDate > $endDate) {
     exit;
 }
 
-// ===================================================
-// 1. Lecture Hours by Lecturer
-//    ONLY from Accepted student bookings
-//    Unique time slot (date + time) = 1 count
-//    Multiple students on same slot → still counts as 1
-// ===================================================
+
 $hoursByLecturer = [];
 $totalHours = 0;
 $totalSlots = 0;
@@ -110,9 +105,7 @@ while ($row = $result->fetch_assoc()) {
 }
 $stmt->close();
 
-// ===================================================
-// 2. Students registered in the date range
-// ===================================================
+
 $students = [];
 $sql2 = "
     SELECT id, full_name, email, mobile, created_at
@@ -146,9 +139,7 @@ while ($row = $result2->fetch_assoc()) {
 }
 $stmt2->close();
 
-// ===================================================
-// Final Response
-// ===================================================
+
 echo json_encode([
     'success' => true,
     'range' => [

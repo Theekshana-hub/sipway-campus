@@ -1,45 +1,9 @@
 <?php
 require_once __DIR__ . '/sms-config.php';
+require_once __DIR__ . '/ESMSlib.php'; // ★ official Mobitel functions: createSession(), sendMessages(), closeSession()
 
 /**
- * Get a fresh SOAP client for Mobitel's Enterprise SMS Web Service.
- */
-function getMobitelSmsClient() {
-    ini_set("soap.wsdl_cache_enabled", "0");
-    return new SoapClient(SMS_WSDL_URL, [
-        'connection_timeout' => 10,
-        'exceptions'         => true,
-    ]);
-}
-
-/**
- * Open a Mobitel SMS session. Returns the session token (string).
- */
-function mobitelCreateSession($client) {
-    $user = new stdClass();
-    $user->id       = SMS_USER_ID;
-    $user->username = SMS_USERNAME;
-    $user->password = SMS_PASSWORD;
-    $user->customer = SMS_CUSTOMER;
-
-    $req = new stdClass();
-    $req->user = $user;
-
-    $res = $client->createSession($req);
-    return $res->return;
-}
-
-/**
- * Close a Mobitel SMS session (always call this after sending).
- */
-function mobitelCloseSession($client, $session) {
-    $req = new stdClass();
-    $req->session = $session;
-    $client->closeSession($req);
-}
-
-/**
- * Send an SMS via the Mobitel Enterprise SMS (SOAP) API.
+ * Send an SMS via the Mobitel mSMS Enterprise (ESMS) API.
  *
  * @param string $toNumber  Recipient mobile number (0771234567 wage widihakata)
  * @param string $message   SMS text content
@@ -63,35 +27,18 @@ function sendSmsNotification($toNumber, $message) {
     }
 
     try {
-        $client  = getMobitelSmsClient();
-        $session = mobitelCreateSession($client);
+        $session = createSession(SMS_USER_ID, SMS_USERNAME, SMS_PASSWORD, SMS_CUSTOMER);
 
         if (empty($session)) {
-            return ['success' => false, 'message' => 'Mobitel session creation failed (check username/password)'];
+            return ['success' => false, 'message' => 'Session eka hadaganna baha (username/password check karanna)'];
         }
 
-        $smsMessage = new stdClass();
-        $smsMessage->message     = $message;
-        $smsMessage->messageId   = "";
-        $smsMessage->recipients  = [$toNumber];
-        $smsMessage->retries     = "";
-        $smsMessage->sender      = SMS_MASK;
-        $smsMessage->messageType = 0; // 0 = normal text SMS
-        $smsMessage->sequenceNum = "";
-        $smsMessage->status      = "";
-        $smsMessage->time        = "";
-        $smsMessage->type        = "";
-        $smsMessage->user        = "";
+        // messageType: 0 = normal message, 1 = promotional
+        $result = sendMessages($session, SMS_MASK, $message, [$toNumber], 0);
 
-        $req = new stdClass();
-        $req->session    = $session;
-        $req->smsMessage = $smsMessage;
+        closeSession($session);
 
-        $res = $client->sendMessages($req);
-
-        mobitelCloseSession($client, $session);
-
-        return ['success' => true, 'message' => is_scalar($res->return) ? (string)$res->return : 'sent'];
+        return ['success' => true, 'message' => is_scalar($result) ? (string)$result : json_encode($result)];
 
     } catch (\SoapFault $e) {
         error_log('Mobitel SMS SOAP error: ' . $e->getMessage());
@@ -113,6 +60,7 @@ function sendSmsNotification($toNumber, $message) {
  * @param string $status  'Accepted' or 'Pending'
  * @return array ['success' => bool, 'message' => string]
  */
+
 function sendBookingNotificationSms($lecturerPhone, $lecturerName, $studentName, $sessionDate, $sessionTime, $status) {
     if (empty($lecturerPhone)) {
         return ['success' => false, 'message' => 'Lecturer phone number empty'];
@@ -122,9 +70,9 @@ function sendBookingNotificationSms($lecturerPhone, $lecturerName, $studentName,
     $timeFormatted = date('h:i A', strtotime($sessionTime));
 
     if ($status === 'Accepted') {
-        $text = "Sipway Campus: {$studentName} - {$dateFormatted} {$timeFormatted} session eka book karala thiyenawa (Confirmed). Dashboard eken check karanna.";
+        $text = "Sipway Campus: {$studentName} has booked a session with you on {$dateFormatted} at {$timeFormatted}. Please join the session at the scheduled time.";
     } else {
-        $text = "Sipway Campus: {$studentName} - {$dateFormatted} {$timeFormatted} session ekakata request ekak dala thiyenawa. Approve karanna dashboard eken.";
+        $text = "Sipway Campus: {$studentName} has requested a session with you on {$dateFormatted} at {$timeFormatted}. Please check your dashboard and approve the booking.";
     }
 
     return sendSmsNotification($lecturerPhone, $text);
