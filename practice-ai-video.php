@@ -262,9 +262,10 @@ a{color:inherit;text-decoration:none}
   </div>
   <?php endif; ?>
   <nav class="top-links">
-    <a href="about_sipway_campus.php">About</a>
-    <a href="terms_of_use.php">Terms</a>
-    <a href="privacy_policy.php">Privacy</a>
+    <a href="about_sipway_campus.php">About Sipway Campus</a>
+    <a href="terms_of_use.php">Terms of Use</a>
+    <a href="privacy_policy.php">Privacy Policy
+</a>
   </nav>
   <?php if ($isLoggedIn): ?>
   <div class="user-menu" id="userMenu">

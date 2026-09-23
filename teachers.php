@@ -679,6 +679,31 @@
   .view-row .vvalue{ font-size:13.5px; color:var(--text); line-height:1.6; white-space:pre-line; }
   .view-row .vvalue.empty{ color:var(--muted-2); font-style:italic; }
 
+  /* ===== Slot type toggle ===== */
+  .slot-type-toggle{
+    display:flex;
+    gap:6px;
+    background:var(--bg);
+    padding:4px;
+    border-radius:9px;
+    border:1px solid var(--line-soft);
+  }
+  .slot-type-btn{
+    flex:1;
+    padding:9px 10px;
+    border-radius:7px;
+    font-size:12px;
+    font-weight:700;
+    color:var(--muted);
+    cursor:pointer;
+    border:none;
+    background:none;
+    transition:background .15s var(--ease), color .15s var(--ease);
+    text-align:center;
+  }
+  .slot-type-btn:hover{ color:var(--navy); }
+  .slot-type-btn.active{ background:#fff; color:var(--coral-dark); box-shadow:0 2px 8px rgba(15,42,74,0.08); }
+
   @media (max-width:880px){
     :root{ --sidebar-w:230px; }
     .sidebar{ transform:translateX(-100%); }
@@ -863,7 +888,7 @@
     <div class="greeting">
       <div>
         <h1>Teachers 👩‍🏫</h1>
-        <p>Sipway Campus හි ලියාපදිංචි lecturers okkoma මෙතන. Lecturer ge name ekata issaraha thiyena 📅 icon eken ඒ lecturer ට availability slot ekak directly add karanna puluwan. දැන් subject එකක් තෝරලා ඒ subject එකට වෙනම time add කරන්න පුළුවන්.</p>
+        <p>Sipway Campus හි ලියාපදිංචි lecturers okkoma මෙතන. Lecturer ge name ekata issaraha thiyena 📅 icon eken ඒ lecturer ට availability slot ekak directly add karanna puluwan. දැන් subject එකක් තෝරලා ඒ subject එකට වෙනම time add කරන්න පුළුවන්. Slot එකක් add කරද්දී "Every Week" option එක select කලොත් ඒ දවසේ time එක හැම සතියකම automatic-ව පේන්න සකසන්න පුළුවන්.</p>
       </div>
       <button class="add-btn" id="openAddModalBtn">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 5v14M5 12h14"/></svg>
@@ -1151,7 +1176,7 @@
   </div>
 </div>
 
-<!-- ===== Add Slot Modal (UPDATED - Subject selection added) ===== -->
+<!-- ===== Add Slot Modal (UPDATED - Weekly recurring option added) ===== -->
 <div class="modal-overlay" id="addSlotModalOverlay">
   <div class="modal-box">
     <div class="modal-head">
@@ -1163,13 +1188,13 @@
     <form id="addSlotForm">
       <div class="modal-body">
         <input type="hidden" id="slotLecturerId">
-        
+
         <div class="form-group">
           <label>Lecturer</label>
           <input type="text" id="slotLecturerName" disabled>
         </div>
 
-        <!-- ========== SUBJECT SELECT (NEW) ========== -->
+        <!-- ========== SUBJECT SELECT ========== -->
         <div class="form-group">
           <label for="slotSubject">Subject</label>
           <select id="slotSubject" required>
@@ -1179,11 +1204,39 @@
           <div class="form-error" id="slot_err_subject"></div>
         </div>
 
+        <!-- ========== SLOT TYPE TOGGLE (NEW) ========== -->
         <div class="form-group">
+          <label>Slot Type</label>
+          <div class="slot-type-toggle" id="slotTypeToggle">
+            <button type="button" class="slot-type-btn active" data-type="once">📅 One-time (Single Date)</button>
+            <button type="button" class="slot-type-btn" data-type="weekly">🔁 Every Week (Recurring)</button>
+          </div>
+          <div class="form-hint">"Every Week" select කලොත් ඔයා තෝරන දවසේ (උදා: හැම Monday එකකම) time slot එක ස්වයංක්‍රීයව හැම සතියකම repeat වෙනවා. එක් වතාවක් විතරක් ඕන නම් "One-time" තියෙන්න.</div>
+        </div>
+
+        <!-- ========== ONE-TIME DATE ========== -->
+        <div class="form-group" id="onceDateWrap">
           <label for="slotDateInput">Date</label>
-          <input type="date" id="slotDateInput" required>
+          <input type="date" id="slotDateInput">
           <div class="form-error" id="slot_err_date"></div>
         </div>
+
+        <!-- ========== WEEKLY DAY-OF-WEEK (NEW) ========== -->
+        <div class="form-group" id="weeklyDayWrap" style="display:none;">
+          <label for="slotWeekday">Day of Week</label>
+          <select id="slotWeekday">
+            <option value="1">Monday</option>
+            <option value="2">Tuesday</option>
+            <option value="3">Wednesday</option>
+            <option value="4">Thursday</option>
+            <option value="5">Friday</option>
+            <option value="6">Saturday</option>
+            <option value="0">Sunday</option>
+          </select>
+          <div class="form-hint">මේ dawasata, හැම සතියකම මේ subject එකට මේ time slot එක automatic-ව create වෙනවා (recurring).</div>
+          <div class="form-error" id="slot_err_weekday"></div>
+        </div>
+
         <div class="form-group">
           <label for="slotStartInput">Start Time</label>
           <input type="time" id="slotStartInput" required>
@@ -1240,6 +1293,7 @@
   let allTeachers = [];
   let currentFilter = 'all';
   let pendingDeleteId = null;
+  let currentSlotType = 'once'; // 'once' | 'weekly'
 
   const avatarColors = ['#0f2a4a','#16385f','#e8825f','#d66c47','#1f9d55','#c0392b'];
 
@@ -1893,19 +1947,48 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
   document.getElementById('closeViewBtn2').addEventListener('click', closeViewModal);
   viewModalOverlay.addEventListener('click', (e) => { if (e.target === viewModalOverlay) closeViewModal(); });
 
-  /* ===== Add Slot Modal (UPDATED) ===== */
+  /* ===== Add Slot Modal (UPDATED with Weekly Recurring) ===== */
   const addSlotModalOverlay = document.getElementById('addSlotModalOverlay');
   const addSlotForm = document.getElementById('addSlotForm');
   const saveSlotBtn = document.getElementById('saveSlotBtn');
+  const slotTypeToggle = document.getElementById('slotTypeToggle');
+  const onceDateWrap = document.getElementById('onceDateWrap');
+  const weeklyDayWrap = document.getElementById('weeklyDayWrap');
+  const slotDateInput = document.getElementById('slotDateInput');
+  const slotWeekdaySelect = document.getElementById('slotWeekday');
+
+  function setSlotType(type) {
+    currentSlotType = type;
+    document.querySelectorAll('.slot-type-btn').forEach(b => {
+      b.classList.toggle('active', b.dataset.type === type);
+    });
+    if (type === 'weekly') {
+      onceDateWrap.style.display = 'none';
+      weeklyDayWrap.style.display = 'block';
+      slotDateInput.required = false;
+    } else {
+      onceDateWrap.style.display = 'block';
+      weeklyDayWrap.style.display = 'none';
+      slotDateInput.required = true;
+    }
+    clearErrors('slot_err_');
+  }
+
+  slotTypeToggle.addEventListener('click', (e) => {
+    const btn = e.target.closest('.slot-type-btn');
+    if (!btn) return;
+    setSlotType(btn.dataset.type);
+  });
 
   function openAddSlotModal(teacher) {
     document.getElementById('slotLecturerId').value = teacher.id;
     document.getElementById('slotLecturerName').value = teacher.full_name;
-    document.getElementById('slotDateInput').value = '';
+    slotDateInput.value = '';
+    slotDateInput.min = new Date().toISOString().split('T')[0];
+    slotWeekdaySelect.value = '1';
     document.getElementById('slotStartInput').value = '';
     document.getElementById('slotEndInput').value = '';
     document.getElementById('slotIsFree').checked = false;
-    document.getElementById('slotDateInput').min = new Date().toISOString().split('T')[0];
 
     // ========== Populate Subject dropdown from teacher's subjects ==========
     const slotSubjectSelect = document.getElementById('slotSubject');
@@ -1918,6 +2001,7 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
         subjects.map(s => `<option value="${s}">${s}</option>`).join('');
     }
 
+    setSlotType('once'); // default to one-time whenever modal opens
     clearErrors('slot_err_');
     addSlotModalOverlay.classList.add('show');
   }
@@ -1925,6 +2009,7 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
   function closeAddSlotModal() {
     addSlotModalOverlay.classList.remove('show');
     addSlotForm.reset();
+    setSlotType('once');
     clearErrors('slot_err_');
   }
 
@@ -1938,7 +2023,8 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
 
     const lecturerId = document.getElementById('slotLecturerId').value;
     const subject    = document.getElementById('slotSubject').value.trim();
-    const date       = document.getElementById('slotDateInput').value;
+    const date       = slotDateInput.value;
+    const weekday    = slotWeekdaySelect.value;
     const start      = document.getElementById('slotStartInput').value;
     const end        = document.getElementById('slotEndInput').value;
     const isFree     = document.getElementById('slotIsFree').checked ? 1 : 0;
@@ -1950,12 +2036,23 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
       el.classList.add('show');
       return;
     }
-    if (!date) {
-      const el = document.getElementById('slot_err_date');
-      el.textContent = 'Date එක ඕන';
-      el.classList.add('show');
-      return;
+
+    if (currentSlotType === 'once') {
+      if (!date) {
+        const el = document.getElementById('slot_err_date');
+        el.textContent = 'Date එක ඕන';
+        el.classList.add('show');
+        return;
+      }
+    } else {
+      if (weekday === '' || weekday === null || typeof weekday === 'undefined') {
+        const el = document.getElementById('slot_err_weekday');
+        el.textContent = 'දවසක් තෝරන්න';
+        el.classList.add('show');
+        return;
+      }
     }
+
     if (!start) {
       const el = document.getElementById('slot_err_start');
       el.textContent = 'Start time එක ඕන';
@@ -1978,23 +2075,34 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
     saveSlotBtn.disabled = true;
     saveSlotBtn.textContent = 'Adding...';
 
+    // Payload: 'type' tells backend whether this is a one-time date slot
+    // or a weekly-recurring slot. For 'weekly', 'weekday' (0=Sun..6=Sat) is sent
+    // instead of a fixed 'date' — the backend is expected to (re)generate this
+    // slot for that weekday every week (or store a recurring rule).
+    const payload = {
+      lecturer_id: lecturerId,
+      subject: subject,
+      type: currentSlotType,          // 'once' | 'weekly'
+      date: currentSlotType === 'once' ? date : null,
+      weekday: currentSlotType === 'weekly' ? parseInt(weekday, 10) : null,
+      start: start,
+      end: end,
+      is_free: isFree
+    };
+
     try {
       const res = await fetch('admin_add_availability.php', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          lecturer_id: lecturerId,
-          subject: subject,        // ← subject එක යවනවා
-          date: date,
-          start: start,
-          end: end,
-          is_free: isFree
-        })
+        body: JSON.stringify(payload)
       });
       const data = await res.json();
 
       if (data.success) {
-        showToast(data.message || (isFree ? 'Free session slot එක add unuwa! 🎁' : 'Slot එක add unuwa! ✅'), 'success-toast');
+        const successMsg = currentSlotType === 'weekly'
+          ? (data.message || 'Weekly recurring slot එක add unuwa! 🔁✅')
+          : (data.message || (isFree ? 'Free session slot එක add unuwa! 🎁' : 'Slot එක add unuwa! ✅'));
+        showToast(successMsg, 'success-toast');
         closeAddSlotModal();
         updateAvailabilityBadge();
       } else if (data.errors) {
