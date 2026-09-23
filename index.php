@@ -2,13 +2,41 @@
 
 session_start();
 
-$needsMobile = !isset($_SESSION['gate_mobile']) || empty($_SESSION['gate_mobile']);
+// --- Mobile gate: figure out if we still need to ask -------------------
+// Previously this only checked $_SESSION['gate_mobile'], so the popup
+// popped up again every time the PHP session ended (new browser session,
+// browser closed, session cookie expired, etc). Now we also remember it
+// with a long-lived cookie, and we skip it completely for anyone who is
+// already logged in (we already have their mobile number from registration).
+
+$alreadyLoggedIn  = isset($_SESSION['student_id']);
+$hasMobileSession = !empty($_SESSION['gate_mobile']);
+$hasMobileCookie  = !empty($_COOKIE['gate_mobile']);
+$hasSkipped       = !empty($_SESSION['gate_mobile_skipped']) || !empty($_COOKIE['gate_mobile_skip']);
+
+// If the cookie survived but the session didn't, resync the session from it.
+if ($hasMobileCookie && !$hasMobileSession) {
+    $_SESSION['gate_mobile'] = $_COOKIE['gate_mobile'];
+    $hasMobileSession = true;
+}
+
+$needsMobile = !$alreadyLoggedIn && !$hasMobileSession && !$hasSkipped;
+
+// AJAX: user clicked the "Cancel" button on the popup — don't ask again today
+if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_skip'])) {
+    $_SESSION['gate_mobile_skipped'] = true;
+    setcookie('gate_mobile_skip', '1', time() + 86400, '/'); // 1 day
+    header('Content-Type: application/json');
+    echo json_encode(['success' => true]);
+    exit;
+}
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_mobile'])) {
     $mobile = preg_replace('/\D/', '', trim($_POST['gate_mobile']));
     
     if (preg_match('/^0\d{9}$/', $mobile)) {
         $_SESSION['gate_mobile'] = $mobile;
+        setcookie('gate_mobile', $mobile, time() + 60 * 60 * 24 * 365, '/'); // remember for 1 year
         $needsMobile = false;
 
        
@@ -2363,6 +2391,28 @@ $conn->close();
     opacity: 0.7;
     cursor: not-allowed;
   }
+  .mobile-gate-cancel-btn {
+    width: 100%;
+    padding: 13px;
+    margin-top: 10px;
+    border: 1.5px solid #e9e5f5;
+    border-radius: 12px;
+    background: #fff;
+    color: #6b7280;
+    font-weight: 700;
+    font-size: 14px;
+    cursor: pointer;
+    transition: background .2s, border-color .2s;
+  }
+  .mobile-gate-cancel-btn:hover {
+    background: #f4f0ff;
+    border-color: #c4b5fd;
+    color: #1e1b4b;
+  }
+  .mobile-gate-cancel-btn:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+  }
 
   /* ========== RESPONSIVE ========== */
   @media (max-width: 1100px) {
@@ -2456,6 +2506,7 @@ $conn->close();
              placeholder="07XXXXXXXX" maxlength="10" inputmode="numeric" autocomplete="tel" required>
       <div class="mobile-gate-error" id="gateMobileError"></div>
       <button type="submit" class="mobile-gate-btn" id="gateMobileBtn">Continue to Dashboard →</button>
+      <button type="button" class="mobile-gate-cancel-btn" id="gateMobileCancelBtn">Cancel</button>
     </form>
   </div>
 </div>
@@ -2476,6 +2527,18 @@ $conn->close();
   });
   document.getElementById('gateMobileInput').addEventListener('input', function() {
     this.value = this.value.replace(/\D/g, '').slice(0, 10);
+  });
+  document.getElementById('gateMobileCancelBtn').addEventListener('click', function() {
+    const btn = this;
+    btn.disabled = true;
+    btn.textContent = 'Please wait...';
+    fetch(window.location.href, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'gate_skip=1'
+    })
+      .then(() => { window.location.reload(); })
+      .catch(() => { window.location.reload(); });
   });
 </script>
 <?php else: ?>

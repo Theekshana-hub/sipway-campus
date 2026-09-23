@@ -337,6 +337,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Booking eka DB eke commit welada, e nisa mail/SMS eka fail
         // unath student ge booking eka affect wenne na — email
         // ekath, SMS ekath try/catch ekakin wrap karala thiyenne e nisa.
+        $lecturerNameForSms = 'your teacher';
+
         if ($lecturer_id > 0) {
             // ★ phone column eka methana 'phone' kiyala danne — oyage
             //   lecturers table eke wena column naamayak (e.g. 'mobile',
@@ -346,6 +348,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $lecStmt->execute();
             $lecRow = $lecStmt->get_result()->fetch_assoc();
             $lecStmt->close();
+
+            if ($lecRow && !empty($lecRow['full_name'])) {
+                $lecturerNameForSms = $lecRow['full_name'];
+            }
 
             // ---------- EMAIL ----------
             if ($lecRow && !empty($lecRow['email'])) {
@@ -384,6 +390,32 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
                     error_log('Booking SMS notification exception: ' . $smsErr->getMessage());
                 }
             }
+        }
+
+        // ---------- SMS (Mobitel) TO THE STUDENT WHO BOOKED ----------
+        try {
+            $studStmt = $conn->prepare("SELECT mobile FROM students WHERE id = ? LIMIT 1");
+            $studStmt->bind_param("i", $studentId);
+            $studStmt->execute();
+            $studRow = $studStmt->get_result()->fetch_assoc();
+            $studStmt->close();
+
+            if ($studRow && !empty($studRow['mobile'])) {
+                $studentSmsResult = sendBookingConfirmationSmsToStudent(
+                    $studRow['mobile'],
+                    $fullName,
+                    $lecturerNameForSms,
+                    $session_date,
+                    $session_time,
+                    $initialStatus
+                );
+                if (!$studentSmsResult['success']) {
+                    error_log('Booking SMS to student failed: ' . $studentSmsResult['message']);
+                }
+            }
+        } catch (\Throwable $studSmsErr) {
+            // Silently ignore — SMS failure should never break the booking response.
+            error_log('Booking SMS to student exception: ' . $studSmsErr->getMessage());
         }
 
         // Friendly message
