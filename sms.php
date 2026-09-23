@@ -69,13 +69,14 @@ function sendBookingNotificationSms($lecturerPhone, $lecturerName, $studentName,
     $timeFormatted = date('h:i A', strtotime($sessionTime));
 
     if ($status === 'Accepted') {
-        $text = "Sipway Campus: {$studentName} - {$dateFormatted} {$timeFormatted} session eka book karala thiyenawa (Confirmed). Dashboard eken check karanna.";
+        $text = "Sipway Campus: {$studentName} has booked a session with you on {$dateFormatted} at {$timeFormatted}. Please join the session at the scheduled time.";
     } else {
-        $text = "Sipway Campus: {$studentName} - {$dateFormatted} {$timeFormatted} session ekakata request ekak dala thiyenawa. Approve karanna dashboard eken.";
+        $text = "Sipway Campus: {$studentName} has requested a session with you on {$dateFormatted} at {$timeFormatted}. Please check your dashboard and approve the booking.";
     }
 
     return sendSmsNotification($lecturerPhone, $text);
 }
+
 
 /**
  * Build and send the booking confirmation SMS to the STUDENT who made the booking.
@@ -88,6 +89,7 @@ function sendBookingNotificationSms($lecturerPhone, $lecturerName, $studentName,
  * @param string $status  'Accepted' or 'Pending'
  * @return array ['success' => bool, 'message' => string]
  */
+
 function sendBookingConfirmationSmsToStudent($studentPhone, $studentName, $lecturerName, $sessionDate, $sessionTime, $status) {
     if (empty($studentPhone)) {
         return ['success' => false, 'message' => 'Student phone number empty'];
@@ -98,9 +100,9 @@ function sendBookingConfirmationSmsToStudent($studentPhone, $studentName, $lectu
     $lecturerName  = $lecturerName ?: 'your teacher';
 
     if ($status === 'Accepted') {
-        $text = "Sipway Campus: Oyage session eka {$lecturerName} samaga {$dateFormatted} {$timeFormatted} confirm wela thiyenawa. Dashboard eken join karanna.";
+        $text = "Sipway Campus: Your session with {$lecturerName} is confirmed for {$dateFormatted} at {$timeFormatted}. Please join the session at the scheduled time.";
     } else {
-        $text = "Sipway Campus: Oyage booking request eka ({$lecturerName} - {$dateFormatted} {$timeFormatted}) yawuna. Teacher approve karaganna tikak inna.";
+        $text = "Sipway Campus: Your session request with {$lecturerName} for {$dateFormatted} at {$timeFormatted} has been sent. Please wait for teacher approval.";
     }
 
     return sendSmsNotification($studentPhone, $text);

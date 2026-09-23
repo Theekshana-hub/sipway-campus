@@ -111,13 +111,27 @@ if ($resLect) {
 }
 
 // ===== Fetch availability WITH subject (approved + future only) =====
+// ★ FIX: now also joins bookings to know how many students already booked each
+//   slot, so a slot that another student has already taken shows as
+//   "Already Booked" instead of a live "Book Now" button.
 $stmtAvail = $conn->prepare("
-    SELECT lecturer_id, subject, date, start_time, end_time, status, room_name, is_free
-    FROM lecturer_availability
-    WHERE date >= CURDATE()
-      AND status IN ('scheduled','live')
-      AND approval_status = 'approved'
-    ORDER BY date ASC, start_time ASC
+    SELECT
+        la.id AS slot_id,
+        la.lecturer_id, la.subject, la.date, la.start_time, la.end_time,
+        la.status, la.room_name, la.is_free,
+        la.session_type, la.max_capacity,
+        COUNT(b.id) AS booked_count
+    FROM lecturer_availability la
+    LEFT JOIN bookings b
+        ON b.lecturer_id = la.lecturer_id
+       AND b.session_date = la.date
+       AND b.session_time = la.start_time
+       AND b.status IN ('Pending','Accepted')
+    WHERE la.date >= CURDATE()
+      AND la.status IN ('scheduled','live')
+      AND la.approval_status = 'approved'
+    GROUP BY la.id
+    ORDER BY la.date ASC, la.start_time ASC
 ");
 $stmtAvail->execute();
 $resAvail = $stmtAvail->get_result();
@@ -128,6 +142,27 @@ while ($a = $resAvail->fetch_assoc()) {
     if ($slotSubject === '') $slotSubject = '—';
     $a['is_free'] = (int)($a['is_free'] ?? 0);
     $a['subject'] = $slotSubject;
+
+    // ★ FIX: work out capacity + whether this slot is already fully booked
+    //   by someone else (session_type / max_capacity come from lecturer_availability;
+    //   if your table doesn't have those columns yet, this still safely
+    //   defaults to individual = 1 seat / group = 10 seats).
+    $sessionType = strtolower(trim($a['session_type'] ?? 'individual'));
+    if (!in_array($sessionType, ['group', 'individual'], true)) {
+        $sessionType = 'individual';
+    }
+    $maxCapacity = (int)($a['max_capacity'] ?? 0);
+    if ($maxCapacity <= 0) {
+        $maxCapacity = ($sessionType === 'group') ? 10 : 1;
+    }
+    $bookedCount = (int)($a['booked_count'] ?? 0);
+
+    $a['slot_id']      = (int)($a['slot_id'] ?? 0);
+    $a['session_type'] = $sessionType;
+    $a['max_capacity'] = $maxCapacity;
+    $a['booked_count'] = $bookedCount;
+    $a['is_full']      = ($a['is_free'] != 1) && ($bookedCount >= $maxCapacity);
+
     if (!isset($lecturersRaw[$lid]['slots_by_subject'][$slotSubject])) {
         $lecturersRaw[$lid]['slots_by_subject'][$slotSubject] = [];
     }
@@ -585,6 +620,12 @@ a { color: inherit; text-decoration: none; }
   background: linear-gradient(135deg, #ecfdf5, #f0fdf4);
 }
 .lect-slot-chip.is-free .lect-slot-date-pill { border-color: #a7f3d0; }
+.lect-slot-chip.is-full {
+  border-color: #fecaca;
+  background: linear-gradient(135deg, #fef2f2, #fff5f5);
+  opacity: 0.9;
+}
+.lect-slot-chip.is-full .lect-slot-date-pill { border-color: #fecaca; }
 .lect-free-display {
   width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 14px; border-radius: 9px; flex-shrink: 0;
@@ -609,6 +650,13 @@ a { color: inherit; text-decoration: none; }
   width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 14px; border-radius: 9px; flex-shrink: 0;
   background: #fef3c7; color: #b45309;
+  font-weight: 800; font-size: 12px; white-space: nowrap; cursor: default; user-select: none;
+}
+/* ★ FIX: badge shown when ANOTHER student has already taken this slot */
+.lect-slot-full-badge {
+  width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  padding: 9px 14px; border-radius: 9px; flex-shrink: 0;
+  background: #fee2e2; color: #b91c1c;
   font-weight: 800; font-size: 12px; white-space: nowrap; cursor: default; user-select: none;
 }
 .lect-no-slots { font-size: 12.5px; color: var(--muted-2); font-style: italic; padding: 4px 0; }
@@ -1395,7 +1443,7 @@ a { color: inherit; text-decoration: none; }
   }
   window.toggleQual = toggleQual;
 
-  function bookSlot(lecturerId, lecturerName, date, start, end, isFree) {
+  function bookSlot(lecturerId, lecturerName, date, start, end, isFree, slotId) {
     if (!IS_LOGGED_IN) {
       openAuthModal(false);
       return;
@@ -1413,6 +1461,9 @@ a { color: inherit; text-decoration: none; }
       end: end,
       is_free: isFree ? '1' : '0'
     });
+    if (slotId && Number(slotId) > 0) {
+      params.set('availability_id', slotId);
+    }
     window.location.href = `book-session.php?${params.toString()}`;
   }
   window.bookSlot = bookSlot;
@@ -1427,10 +1478,20 @@ a { color: inherit; text-decoration: none; }
           const nameEscaped = (l.full_name || '').replace(/'/g, "\\'");
           const isFree = Number(s.is_free) === 1;
           const freeBadge = isFree ? `<span class="lect-free-badge">FREE</span>` : '';
-          const chipClass = isFree ? 'lect-slot-chip is-free' : 'lect-slot-chip';
           const startShort = String(s.start_time).slice(0,5);
           const endShort = String(s.end_time).slice(0,5);
           const existingBooking = getBookingForSlot(l.id, s.date, s.start_time);
+
+          // ★ FIX: figure out if this slot is already fully booked by
+          //   someone else (any student, not just the current one).
+          const bookedCount = Number(s.booked_count) || 0;
+          const maxCapacity = Number(s.max_capacity) || 1;
+          const isFull = !isFree && (Boolean(s.is_full) || bookedCount >= maxCapacity);
+
+          let chipClass = 'lect-slot-chip';
+          if (isFree) chipClass += ' is-free';
+          else if (isFull && !existingBooking) chipClass += ' is-full';
+
           let actionHtml;
           if (isFree) {
             actionHtml = `<span class="lect-free-display">🎁 Free Session</span>`;
@@ -1438,6 +1499,9 @@ a { color: inherit; text-decoration: none; }
             actionHtml = existingBooking.status === 'Accepted'
               ? `<span class="lect-slot-booked-badge">✔ Already Booked</span>`
               : `<span class="lect-slot-pending-badge">⏳ Pending Approval</span>`;
+          } else if (isFull) {
+            // ★ FIX: another student already took this slot — no Book Now button
+            actionHtml = `<span class="lect-slot-full-badge">🚫 Already Booked</span>`;
           } else {
             let btnLabel, btnClass, btnIcon;
             if (!IS_LOGGED_IN) {
@@ -1453,7 +1517,7 @@ a { color: inherit; text-decoration: none; }
               btnClass = '';
               btnIcon = `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 6L9 17l-5-5"/></svg>`;
             }
-            actionHtml = `<button class="lect-slot-book-btn ${btnClass}" onclick="bookSlot(${l.id}, '${nameEscaped}', '${s.date}', '${startShort}', '${endShort}', false)">${btnIcon}${btnLabel}</button>`;
+            actionHtml = `<button class="lect-slot-book-btn ${btnClass}" onclick="bookSlot(${l.id}, '${nameEscaped}', '${s.date}', '${startShort}', '${endShort}', false, ${Number(s.slot_id) || 0})">${btnIcon}${btnLabel}</button>`;
           }
           const dp = fmtDatePill(s.date);
           const duration = calcDuration(startShort, endShort);
@@ -1816,8 +1880,6 @@ a { color: inherit; text-decoration: none; }
     fd.append('email', regEmail.value.trim());
     fd.append('mobile', regMobile.value.trim());
     fd.append('language', normalizeCode(regLanguage.value));
-    fd.append('gender', document.getElementById('gpRegGender').value);
-    fd.append('address', document.getElementById('gpRegAddress').value.trim());
     fd.append('password', regPass.value);
     const photoFile = document.getElementById('gpRegPhoto').files[0];
     if (photoFile) fd.append('profilePhoto', photoFile);
