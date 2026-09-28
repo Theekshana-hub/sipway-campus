@@ -5,7 +5,6 @@ if (!isset($conn) || $conn === null) {
     die("Database connection failed. Please check db.php file.");
 }
 $isLoggedIn = isset($_SESSION['student_id']);
-// ---------- Defaults (guest state) ----------
 $studentId       = null;
 $studentName     = '';
 $studentLanguage = 'en';
@@ -856,10 +855,40 @@ a { color: inherit; text-decoration: none; }
     object-fit: contain;
     border-radius: 10px;
 }
+/* ========== FOOTER ========== */
+.site-footer {
+  background: var(--topbar-bg);
+  color: #94a3b8;
+  text-align: center;
+  padding: 18px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  position: relative;
+  z-index: 40;
+}
+.site-footer .footer-powered strong {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+}
+.site-footer a { transition: opacity .2s; }
+.site-footer a:hover { opacity: 0.8; }
+.site-footer .footer-copy {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: #64748b;
+  font-weight: 500;
+}
+@media (max-width: 560px) {
+  .site-footer { padding: 14px 12px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
-<!-- ==================== TOPBAR ==================== -->
 <header class="topbar">
   <button class="burger" id="burgerBtn" aria-label="Toggle menu">
     <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
@@ -1196,7 +1225,16 @@ a { color: inherit; text-decoration: none; }
     </div>
   </div>
 </div>
+  </main>
+</div>
 
+<!-- ==================== FOOTER ==================== -->
+<footer class="site-footer">
+  <span class="footer-powered">Powered by <a href="index.php"><strong>Sipway Campus</strong></a></span>
+  <span class="footer-copy">© <?php echo date('Y'); ?> Sipway Campus. All rights reserved.</span>
+</footer>
+
+<!-- ==================== HOW TO REGISTER VIDEO MODAL ==================== -->
 <script>
   const IS_LOGGED_IN = <?php echo json_encode($isLoggedIn); ?>;
 

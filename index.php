@@ -2491,6 +2491,37 @@ $conn->close();
 .gp-lang-option.enabled:hover {
   background: var(--purple-soft);
 }
+/* ========== FOOTER ========== */
+.site-footer {
+  background: var(--topbar-bg);
+  color: #94a3b8;
+  text-align: center;
+  padding: 18px 20px;
+  font-size: 13px;
+  font-weight: 600;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  position: relative;
+  z-index: 40;
+}
+.site-footer .footer-powered strong {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  font-weight: 800;
+}
+.site-footer a { transition: opacity .2s; }
+.site-footer a:hover { opacity: 0.8; }
+.site-footer .footer-copy {
+  display: block;
+  margin-top: 4px;
+  font-size: 11.5px;
+  color: #64748b;
+  font-weight: 500;
+}
+@media (max-width: 560px) {
+  .site-footer { padding: 14px 12px; font-size: 12px; }
+}
 </style>
 </head>
 <body>
@@ -3047,6 +3078,11 @@ $conn->close();
     </button>
   </div>
 </div>
+<!-- ==================== FOOTER ==================== -->
+<footer class="site-footer">
+  <span class="footer-powered">Powered by <a href="index.php"><strong>Sipway Campus</strong></a></span>
+  <span class="footer-copy">© <?php echo date('Y'); ?> Sipway Campus. All rights reserved.</span>
+</footer>
 
 <script>
   const IS_LOGGED_IN = <?php echo $isLoggedIn ? 'true' : 'false'; ?>;
