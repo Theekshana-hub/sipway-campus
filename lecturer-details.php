@@ -1085,7 +1085,7 @@ a { color: inherit; text-decoration: none; }
       <div class="dropdown" id="userDropdown">
         <a href="edit_profile.php">✏️ My Profile</a>
        
-        <a href="logout.php" class="danger">Log out</a>
+        <a href="student_logout.php" class="danger">Log out</a>
       </div>
     </div>
   <?php else: ?>
