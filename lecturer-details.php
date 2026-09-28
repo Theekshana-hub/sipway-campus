@@ -97,9 +97,16 @@ function resolveLecturerPhoto($photo){
     return 'uploads/lecturers/' . $photo;
 }
 
-// ===== Fetch ALL lecturers =====
+// ===== Fetch ONLY APPROVED lecturers =====
+// ★ FIX: pending / rejected lecturers are NOT shown to students.
+//   Only lecturers whose status = 'approved' (approved by admin in teachers.php) appear here.
 $lecturersRaw = [];
-$resLect = $conn->query("SELECT id, full_name, email, qualifications, subject, photo, language FROM lecturers ORDER BY full_name ASC");
+$resLect = $conn->query("
+    SELECT id, full_name, email, qualifications, subject, photo, language
+    FROM lecturers
+    WHERE status = 'approved'
+    ORDER BY full_name ASC
+");
 if ($resLect) {
     while ($r = $resLect->fetch_assoc()) {
         $r['id'] = (int)$r['id'];
@@ -111,9 +118,9 @@ if ($resLect) {
 }
 
 // ===== Fetch availability WITH subject (approved + future only) =====
-// ★ FIX: now also joins bookings to know how many students already booked each
-//   slot, so a slot that another student has already taken shows as
-//   "Already Booked" instead of a live "Book Now" button.
+// Joins bookings to know how many students already booked each slot,
+// so a slot that another student has already taken shows as "Already Booked".
+// (Slots of non-approved lecturers are skipped below because they are not in $lecturersRaw.)
 $stmtAvail = $conn->prepare("
     SELECT
         la.id AS slot_id,
@@ -137,16 +144,12 @@ $stmtAvail->execute();
 $resAvail = $stmtAvail->get_result();
 while ($a = $resAvail->fetch_assoc()) {
     $lid = (int)$a['lecturer_id'];
-    if (!isset($lecturersRaw[$lid])) continue;
+    if (!isset($lecturersRaw[$lid])) continue; // not an approved lecturer → skip
     $slotSubject = trim($a['subject'] ?? '');
     if ($slotSubject === '') $slotSubject = '—';
     $a['is_free'] = (int)($a['is_free'] ?? 0);
     $a['subject'] = $slotSubject;
 
-    // ★ FIX: work out capacity + whether this slot is already fully booked
-    //   by someone else (session_type / max_capacity come from lecturer_availability;
-    //   if your table doesn't have those columns yet, this still safely
-    //   defaults to individual = 1 seat / group = 10 seats).
     $sessionType = strtolower(trim($a['session_type'] ?? 'individual'));
     if (!in_array($sessionType, ['group', 'individual'], true)) {
         $sessionType = 'individual';
@@ -652,7 +655,7 @@ a { color: inherit; text-decoration: none; }
   background: #fef3c7; color: #b45309;
   font-weight: 800; font-size: 12px; white-space: nowrap; cursor: default; user-select: none;
 }
-/* ★ FIX: badge shown when ANOTHER student has already taken this slot */
+/* Badge shown when ANOTHER student has already taken this slot */
 .lect-slot-full-badge {
   width: 100%; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
   padding: 9px 14px; border-radius: 9px; flex-shrink: 0;
@@ -1336,8 +1339,6 @@ a { color: inherit; text-decoration: none; }
     </div>
   </div>
 </div>
-  </main>
-</div>
 
 <!-- ==================== FOOTER ==================== -->
 <footer class="site-footer">
@@ -1345,7 +1346,6 @@ a { color: inherit; text-decoration: none; }
   <span class="footer-copy">© <?php echo date('Y'); ?> Sipway Campus. All rights reserved.</span>
 </footer>
 
-<!-- ==================== HOW TO REGISTER VIDEO MODAL ==================== -->
 <script>
 (function(){
   const IS_LOGGED_IN = <?php echo $isLoggedIn ? 'true' : 'false'; ?>;
@@ -1522,8 +1522,7 @@ a { color: inherit; text-decoration: none; }
           const endShort = String(s.end_time).slice(0,5);
           const existingBooking = getBookingForSlot(l.id, s.date, s.start_time);
 
-          // ★ FIX: figure out if this slot is already fully booked by
-          //   someone else (any student, not just the current one).
+          // Is this slot already fully booked by someone else?
           const bookedCount = Number(s.booked_count) || 0;
           const maxCapacity = Number(s.max_capacity) || 1;
           const isFull = !isFree && (Boolean(s.is_full) || bookedCount >= maxCapacity);
@@ -1540,7 +1539,6 @@ a { color: inherit; text-decoration: none; }
               ? `<span class="lect-slot-booked-badge">✔ Already Booked</span>`
               : `<span class="lect-slot-pending-badge">⏳ Pending Approval</span>`;
           } else if (isFull) {
-            // ★ FIX: another student already took this slot — no Book Now button
             actionHtml = `<span class="lect-slot-full-badge">🚫 Already Booked</span>`;
           } else {
             let btnLabel, btnClass, btnIcon;

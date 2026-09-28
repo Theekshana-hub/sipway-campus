@@ -307,6 +307,12 @@
     color:var(--navy);
   }
   .panel-head p{ margin:2px 0 0; font-size:12px; color:var(--muted); }
+  .panel-head-actions{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    flex-wrap:wrap;
+  }
   .pending-tag{
     padding:6px 13px;
     border-radius:999px;
@@ -380,7 +386,8 @@
     margin-left:auto;
     display:flex;
     align-items:center;
-    gap:6px;
+    gap:8px;
+    flex-wrap:wrap;
   }
   .count-chip{
     background:var(--navy-soft);
@@ -479,6 +486,7 @@
     letter-spacing:0.1px;
     cursor:pointer;
     border:1px solid transparent;
+    font-family:inherit;
     transition:background .18s var(--ease), color .18s var(--ease), box-shadow .18s var(--ease), transform .12s var(--ease), border-color .18s var(--ease);
   }
   .edit-btn svg, .delete-btn svg{ width:13px; height:13px; flex-shrink:0; }
@@ -508,6 +516,7 @@
     transform:translateY(-1px);
   }
   .delete-btn:active{ transform:translateY(0); box-shadow:none; }
+  .delete-btn:disabled{ opacity:.6; cursor:not-allowed; transform:none; box-shadow:none; }
   .empty-state{
     padding:40px 20px;
     text-align:center;
@@ -842,7 +851,13 @@
           <h3>Approved Slots</h3>
           <p>Lecturer ලා ගේ approved වුනු lecture time slots — Lecturer → Subject වෙන වෙනම පෙනෙනවා</p>
         </div>
-        <span class="pending-tag" style="border-color:var(--success);background:var(--success-soft);color:var(--success);">Showing: Approved only</span>
+        <div class="panel-head-actions">
+          <span class="pending-tag" style="border-color:var(--success);background:var(--success-soft);color:var(--success);">Showing: Approved only</span>
+          <button class="delete-btn" id="deleteAllBtn" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/><path d="M10 11v6M14 11v6"/></svg>
+            <span>Delete All Slots</span>
+          </button>
+        </div>
       </div>
       <div class="table-wrap">
         <table>
@@ -902,6 +917,7 @@
 (function(){
   const currentFilter = 'approved';
   const openGroups = new Set();
+  let currentList = [];
   const BADGE_POLL_INTERVAL_MS = 15000;
   const PHOTO_BASE_PATH = 'uploads/lecturers/';
 
@@ -1059,6 +1075,7 @@
     groups.forEach((lectData, lecturerName) => {
       const groupId = 'grp_' + btoa(unescape(encodeURIComponent(lecturerName))).replace(/[^a-zA-Z0-9]/g, '');
       const totalSlots = Array.from(lectData.subjects.values()).reduce((sum, arr) => sum + arr.length, 0);
+      const lecturerSlotIds = Array.from(lectData.subjects.values()).flat().map(s => s.id).join(',');
       const isOpen = openGroups.has(groupId);
 
       // Lecturer header row
@@ -1076,6 +1093,12 @@
           <td colspan="2">
             <div class="group-count">
               <span class="count-chip">${totalSlots} approved</span>
+              <button class="delete-btn delete-all-btn" type="button"
+                data-lecturer="${escapeHtml(lecturerName)}"
+                data-ids="${lecturerSlotIds}">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M8 6V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6h14z"/><path d="M10 11v6M14 11v6"/></svg>
+                <span>Delete All</span>
+              </button>
             </div>
           </td>
         </tr>
@@ -1083,8 +1106,6 @@
 
       // For each subject under this lecturer
       lectData.subjects.forEach((slots, subjectName) => {
-        const subjId = groupId + '_subj_' + btoa(unescape(encodeURIComponent(subjectName))).replace(/[^a-zA-Z0-9]/g, '');
-
         // Subject sub-header
         html += `
           <tr class="subject-header-row${isOpen ? ' show' : ''}" data-group="${groupId}">
@@ -1139,7 +1160,10 @@
 
     // Expand / collapse
     tbody.querySelectorAll('.group-row').forEach(row => {
-      row.addEventListener('click', () => {
+      row.addEventListener('click', (e) => {
+        // "Delete All" button click කරාම expand/collapse වෙන්න එපා
+        if (e.target.closest('.delete-all-btn')) return;
+
         const groupId = row.dataset.group;
         const isNowOpen = !row.classList.contains('open');
         row.classList.toggle('open', isNowOpen);
@@ -1162,6 +1186,7 @@
       const res = await fetch(`admin_get_pending_availability.php?filter=${currentFilter}`);
       const data = await res.json();
       if (!data.success) {
+        currentList = [];
         tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">${escapeHtml(data.message || 'Error')}</div></td></tr>`;
         return;
       }
@@ -1170,8 +1195,10 @@
         const allData = await allRes.json();
         if (allData.success) updateStats(allData.data);
       } catch(e) {}
+      currentList = data.data;
       renderTable(data.data);
     } catch(e) {
+      currentList = [];
       tbody.innerHTML = `<tr><td colspan="5"><div class="empty-state">Server error.</div></td></tr>`;
     }
   }
@@ -1255,6 +1282,7 @@
     }
   });
 
+  /* ===== Delete (single) ===== */
   window.deleteSlot = async function(id){
     if (!confirm('මේ slot එක permanently delete කරන්නද? මේක undo කරන්න බැහැ.')) return;
     try {
@@ -1275,6 +1303,48 @@
     }
   };
 
+  /* ===== Delete (bulk) ===== */
+  async function deleteMany(ids, confirmMsg){
+    if (!ids.length) return;
+    if (!confirm(confirmMsg)) return;
+
+    const allBtns = document.querySelectorAll('#deleteAllBtn, .delete-all-btn');
+    allBtns.forEach(b => b.disabled = true);
+
+    try {
+      const results = await Promise.all(ids.map(id =>
+        fetch('admin_delete_availability.php', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ id })
+        }).then(r => r.json()).catch(() => ({ success:false }))
+      ));
+      const ok = results.filter(r => r.success).length;
+      const failed = results.length - ok;
+      if (failed === 0) showToast(`Slots ${ok} ක් delete කළා`, 'success-toast');
+      else showToast(`${ok} delete උනා, ${failed} fail උනා`, 'error-toast');
+    } catch(e) {
+      showToast('Server error', 'error-toast');
+    }
+    loadRequests();
+  }
+
+  // Lecturer කෙනෙක්ගේ Delete All
+  document.getElementById('tbody').addEventListener('click', (e) => {
+    const btn = e.target.closest('.delete-all-btn');
+    if (!btn) return;
+    e.stopPropagation();
+    const ids = btn.dataset.ids.split(',').filter(Boolean);
+    deleteMany(ids, `${btn.dataset.lecturer} ගේ approved slots ${ids.length} ම permanently delete කරන්නද? මේක undo කරන්න බැහැ.`);
+  });
+
+  // සියලුම slots Delete All
+  document.getElementById('deleteAllBtn').addEventListener('click', () => {
+    const ids = currentList.map(r => r.id);
+    if (!ids.length) { showToast('Delete කරන්න slots නැහැ', 'error-toast'); return; }
+    deleteMany(ids, `Approved slots ${ids.length} ම permanently delete කරන්නද? මේක undo කරන්න බැහැ.`);
+  });
+
   document.getElementById('menuToggle')?.addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('open');
     document.getElementById('sidebarBackdrop').classList.toggle('show');
@@ -1283,9 +1353,9 @@
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebarBackdrop').classList.remove('show');
   });
-document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  window.location.href = 'admin_logout.php';
-});
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    window.location.href = 'admin_logout.php';
+  });
 
   loadRequests();
   updateBookingsBadge();
