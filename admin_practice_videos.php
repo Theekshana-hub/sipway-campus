@@ -6,7 +6,7 @@ if (!isset($conn) || $conn === null) {
     die('Database connection failed.');
 }
 
-
+/* ===== Table (with YouTube support) ===== */
 $conn->query("
 CREATE TABLE IF NOT EXISTS practice_videos (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -15,6 +15,8 @@ CREATE TABLE IF NOT EXISTS practice_videos (
   language VARCHAR(10) DEFAULT 'en',
   level VARCHAR(30) DEFAULT 'Beginner',
   video_path VARCHAR(500) NOT NULL,
+  source_type ENUM('file','youtube') NOT NULL DEFAULT 'file',
+  youtube_id VARCHAR(20) DEFAULT NULL,
   thumbnail_path VARCHAR(500) DEFAULT NULL,
   duration_label VARCHAR(20) DEFAULT NULL,
   status ENUM('active','hidden') DEFAULT 'active',
@@ -22,6 +24,16 @@ CREATE TABLE IF NOT EXISTS practice_videos (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 ");
+
+/* ===== Auto migration for existing tables ===== */
+$chk = $conn->query("SHOW COLUMNS FROM practice_videos LIKE 'source_type'");
+if ($chk && $chk->num_rows === 0) {
+    $conn->query("ALTER TABLE practice_videos ADD COLUMN source_type ENUM('file','youtube') NOT NULL DEFAULT 'file' AFTER video_path");
+}
+$chk = $conn->query("SHOW COLUMNS FROM practice_videos LIKE 'youtube_id'");
+if ($chk && $chk->num_rows === 0) {
+    $conn->query("ALTER TABLE practice_videos ADD COLUMN youtube_id VARCHAR(20) DEFAULT NULL AFTER source_type");
+}
 
 $uploadDir = __DIR__ . '/uploads/practice_videos/';
 $thumbDir  = __DIR__ . '/uploads/practice_thumbs/';
@@ -67,6 +79,71 @@ function uploadErrorMessage($code) {
     return $map[$code] ?? ('Unknown upload error code: ' . $code);
 }
 
+/* Extract YouTube video ID from any common URL format (returns '' if invalid) */
+function extractYoutubeId($url) {
+    $url = trim($url);
+    if ($url === '') return '';
+
+    // Allow pasting a bare 11-char ID
+    if (preg_match('/^[A-Za-z0-9_-]{11}$/', $url)) {
+        return $url;
+    }
+
+    if (!preg_match('#^https?://#i', $url)) {
+        $url = 'https://' . $url;
+    }
+
+    $parts = parse_url($url);
+    if (!$parts || empty($parts['host'])) return '';
+
+    $host = strtolower(preg_replace('/^www\./', '', $parts['host']));
+    $path = $parts['path'] ?? '';
+    $id   = '';
+
+    if ($host === 'youtu.be') {
+        $id = trim($path, '/');
+        $id = explode('/', $id)[0];
+    } elseif ($host === 'youtube.com' || $host === 'm.youtube.com' || $host === 'music.youtube.com' || $host === 'youtube-nocookie.com') {
+        if (preg_match('#^/(embed|shorts|live|v)/([A-Za-z0-9_-]{11})#', $path, $m)) {
+            $id = $m[2];
+        } else {
+            parse_str($parts['query'] ?? '', $q);
+            $id = $q['v'] ?? '';
+        }
+    }
+
+    return preg_match('/^[A-Za-z0-9_-]{11}$/', $id) ? $id : '';
+}
+
+/* Save optional thumbnail upload, returns relative path or '' */
+function saveThumbnailUpload($thumbDir) {
+    if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
+        $tExt = strtolower(pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION));
+        if (in_array($tExt, ['jpg','jpeg','png','webp'], true) && is_dir($thumbDir) && is_writable($thumbDir)) {
+            $tName = 'thumb_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $tExt;
+            if (move_uploaded_file($_FILES['thumbnail']['tmp_name'], $thumbDir . $tName)) {
+                return 'uploads/practice_thumbs/' . $tName;
+            }
+        }
+    }
+    return '';
+}
+
+/* Delete local files belonging to a DB row (never touches external URLs) */
+function deleteLocalMedia($row) {
+    $isYoutube = (($row['source_type'] ?? 'file') === 'youtube');
+
+    if (!$isYoutube && !empty($row['video_path']) && !preg_match('#^https?://#i', $row['video_path'])) {
+        $p = __DIR__ . '/' . $row['video_path'];
+        if (file_exists($p)) @unlink($p);
+    }
+    if (!empty($row['thumbnail_path']) && !preg_match('#^https?://#i', $row['thumbnail_path'])) {
+        $p = __DIR__ . '/' . $row['thumbnail_path'];
+        if (file_exists($p)) @unlink($p);
+    }
+}
+
+/* ===== Upload (file OR YouTube link) ===== */
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['action'] === 'upload') {
     $title       = trim($_POST['title'] ?? '');
     $description = trim($_POST['description'] ?? '');
@@ -74,6 +151,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     $level       = trim($_POST['level'] ?? 'Beginner');
     $duration    = trim($_POST['duration_label'] ?? '');
     $sortOrder   = (int)($_POST['sort_order'] ?? 0);
+    $sourceType  = (($_POST['source_type'] ?? 'file') === 'youtube') ? 'youtube' : 'file';
 
     if (!isset($langOptions[$language])) {
         $language = 'en';
@@ -82,6 +160,55 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     if ($title === '') {
         $message = 'Title is required.';
         $messageType = 'error';
+
+    /* ---------- YOUTUBE MODE ---------- */
+    } elseif ($sourceType === 'youtube') {
+        $ytUrl = trim($_POST['youtube_url'] ?? '');
+        $ytId  = extractYoutubeId($ytUrl);
+
+        if ($ytUrl === '') {
+            $message = 'YouTube link is required.';
+            $messageType = 'error';
+        } elseif ($ytId === '') {
+            $message = 'Invalid YouTube link. Please paste a valid youtube.com / youtu.be URL.';
+            $messageType = 'error';
+        } else {
+            $videoPath = 'https://www.youtube.com/watch?v=' . $ytId;
+
+            // Custom thumbnail if uploaded, otherwise YouTube auto thumbnail
+            $thumbPath = saveThumbnailUpload($thumbDir);
+            if ($thumbPath === '') {
+                $thumbPath = 'https://img.youtube.com/vi/' . $ytId . '/hqdefault.jpg';
+            }
+
+            $stmt = $conn->prepare("
+                INSERT INTO practice_videos
+                (title, description, language, level, video_path, source_type, youtube_id, thumbnail_path, duration_label, sort_order, status)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
+            ");
+            if (!$stmt) {
+                $message = 'Prepare failed: ' . $conn->error;
+                $messageType = 'error';
+            } else {
+                $stmt->bind_param(
+                    'sssssssssi',
+                    $title, $description, $language, $level,
+                    $videoPath, $sourceType, $ytId, $thumbPath, $duration, $sortOrder
+                );
+                if ($stmt->execute()) {
+                    $flag  = $langOptions[$language]['flag'] ?? '';
+                    $label = $langOptions[$language]['label'] ?? $language;
+                    $message = "YouTube video added successfully for {$flag} {$label} students. ID: " . $stmt->insert_id;
+                    $messageType = 'success';
+                } else {
+                    $message = 'DB insert failed: ' . $stmt->error;
+                    $messageType = 'error';
+                }
+                $stmt->close();
+            }
+        }
+
+    /* ---------- FILE MODE ---------- */
     } elseif (!isset($_FILES['video'])) {
         $message = 'No video field received. Check form enctype="multipart/form-data".';
         $messageType = 'error';
@@ -108,22 +235,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 $messageType = 'error';
             } else {
                 $videoPath = 'uploads/practice_videos/' . $safeName;
-                $thumbPath = '';
-
-                if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
-                    $tExt = strtolower(pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION));
-                    if (in_array($tExt, ['jpg','jpeg','png','webp'], true) && is_dir($thumbDir) && is_writable($thumbDir)) {
-                        $tName = 'thumb_' . time() . '_' . bin2hex(random_bytes(3)) . '.' . $tExt;
-                        if (move_uploaded_file($_FILES['thumbnail']['tmp_name'], $thumbDir . $tName)) {
-                            $thumbPath = 'uploads/practice_thumbs/' . $tName;
-                        }
-                    }
-                }
+                $thumbPath = saveThumbnailUpload($thumbDir);
+                $ytId      = null;
 
                 $stmt = $conn->prepare("
                     INSERT INTO practice_videos
-                    (title, description, language, level, video_path, thumbnail_path, duration_label, sort_order, status)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'active')
+                    (title, description, language, level, video_path, source_type, youtube_id, thumbnail_path, duration_label, sort_order, status)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'active')
                 ");
                 if (!$stmt) {
                     $message = 'Prepare failed: ' . $conn->error;
@@ -131,9 +249,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     @unlink($dest);
                 } else {
                     $stmt->bind_param(
-                        'sssssssi',
+                        'sssssssssi',
                         $title, $description, $language, $level,
-                        $videoPath, $thumbPath, $duration, $sortOrder
+                        $videoPath, $sourceType, $ytId, $thumbPath, $duration, $sortOrder
                     );
                     if ($stmt->execute()) {
                         $flag  = $langOptions[$language]['flag'] ?? '';
@@ -166,21 +284,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
     // Single Delete
     if ($_POST['action'] === 'delete' && isset($_POST['id'])) {
         $id = (int)$_POST['id'];
-        $r = $conn->query("SELECT video_path, thumbnail_path FROM practice_videos WHERE id = $id");
+        $r = $conn->query("SELECT video_path, thumbnail_path, source_type FROM practice_videos WHERE id = $id");
         if ($r && $row = $r->fetch_assoc()) {
-            if (!empty($row['video_path']) && file_exists(__DIR__ . '/' . $row['video_path'])) {
-                @unlink(__DIR__ . '/' . $row['video_path']);
-            }
-            if (!empty($row['thumbnail_path']) && file_exists(__DIR__ . '/' . $row['thumbnail_path'])) {
-                @unlink(__DIR__ . '/' . $row['thumbnail_path']);
-            }
+            deleteLocalMedia($row);
         }
         $conn->query("DELETE FROM practice_videos WHERE id = $id");
         $message = 'Video deleted.';
         $messageType = 'success';
     }
 
-    // ===== BULK DELETE =====
+    // Bulk Delete
     if ($_POST['action'] === 'bulk_delete') {
         if (empty($_POST['selected_ids']) || !is_array($_POST['selected_ids'])) {
             $message = 'No videos selected.';
@@ -195,20 +308,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
             } else {
                 $idList = implode(',', $ids);
 
-                // Delete files
-                $r = $conn->query("SELECT video_path, thumbnail_path FROM practice_videos WHERE id IN ($idList)");
+                $r = $conn->query("SELECT video_path, thumbnail_path, source_type FROM practice_videos WHERE id IN ($idList)");
                 if ($r) {
                     while ($row = $r->fetch_assoc()) {
-                        if (!empty($row['video_path']) && file_exists(__DIR__ . '/' . $row['video_path'])) {
-                            @unlink(__DIR__ . '/' . $row['video_path']);
-                        }
-                        if (!empty($row['thumbnail_path']) && file_exists(__DIR__ . '/' . $row['thumbnail_path'])) {
-                            @unlink(__DIR__ . '/' . $row['thumbnail_path']);
-                        }
+                        deleteLocalMedia($row);
                     }
                 }
 
-                // Delete from DB
                 $conn->query("DELETE FROM practice_videos WHERE id IN ($idList)");
                 $deletedCount = $conn->affected_rows;
 
@@ -329,6 +435,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   .badge{ display:inline-block; padding:2px 8px; border-radius:999px; font-size:10px; font-weight:800; }
   .badge.active{ background:var(--success-soft); color:var(--success); }
   .badge.hidden{ background:var(--danger-soft); color:var(--danger); }
+  .badge.yt{ background:#ffe9e9; color:#d62828; }
   .lang-chip{ display:inline-flex; align-items:center; gap:4px; padding:2px 8px; border-radius:999px; font-size:11px; font-weight:800; background:var(--navy-soft); color:var(--navy); }
   .list-filters{ display:flex; flex-wrap:wrap; gap:6px; margin-bottom:14px; }
   .list-filter{ padding:5px 11px; border-radius:999px; font-size:11.5px; font-weight:700; border:1px solid var(--line); background:#fff; color:var(--muted); cursor:pointer; transition:all .15s var(--ease); }
@@ -339,10 +446,24 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   .video-modal-backdrop.show{ display:flex; }
   .video-modal{ width:100%; max-width:820px; background:#000; border-radius:14px; overflow:hidden; box-shadow:0 30px 80px rgba(0,0,0,0.5); position:relative; }
   .video-modal video{ width:100%; max-height:75vh; display:block; background:#000; }
+  .video-modal iframe{ width:100%; aspect-ratio:16/9; display:none; border:0; background:#000; }
   .video-modal-head{ display:flex; align-items:center; justify-content:space-between; padding:12px 16px; background:#12213a; color:#fff; }
   .video-modal-head h4{ margin:0; font-size:13.5px; font-weight:700; }
   .video-modal-close{ background:rgba(255,255,255,0.1); border:none; color:#fff; width:30px; height:30px; border-radius:8px; cursor:pointer; font-size:16px; line-height:1; flex-shrink:0; }
   .video-modal-close:hover{ background:rgba(255,255,255,0.2); }
+
+  /* Source toggle (Upload file / YouTube link) */
+  .source-tabs{ display:flex; gap:8px; margin-bottom:14px; padding:4px; background:var(--navy-soft); border-radius:10px; }
+  .source-tab{ flex:1; display:flex; align-items:center; justify-content:center; gap:7px; padding:9px 10px; border-radius:8px; font-size:12.5px; font-weight:800; color:var(--muted); cursor:pointer; user-select:none; transition:all .15s var(--ease); margin:0; }
+  .source-tab input{ display:none; }
+  .source-tab.selected{ background:#fff; color:var(--navy); box-shadow:0 2px 8px rgba(15,42,74,0.1); }
+  .source-tab.selected.yt{ color:#d62828; }
+  .source-pane{ display:none; }
+  .source-pane.show{ display:block; }
+  .yt-preview{ display:none; margin:-4px 0 14px; padding:10px; border:1px solid var(--line-soft); border-radius:10px; background:#fbfaf9; gap:12px; align-items:center; }
+  .yt-preview.show{ display:flex; }
+  .yt-preview img{ width:112px; height:63px; object-fit:cover; border-radius:8px; background:#ddd; flex-shrink:0; }
+  .yt-preview span{ font-size:12px; color:var(--muted); font-weight:600; }
 
   /* Bulk bar */
   .bulk-bar{
@@ -560,7 +681,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   <div class="content">
     <div class="greeting">
       <h1>Practice Videos 🎬</h1>
-      <p>Language අනුව students ට practice videos upload / manage කරන්න.</p>
+      <p>Language අනුව students ට practice videos upload / YouTube link add / manage කරන්න.</p>
     </div>
 
     <?php if ($message): ?>
@@ -579,10 +700,11 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     <div class="grid">
       <!-- Upload Panel -->
       <div class="panel">
-        <h3>Upload New Video</h3>
+        <h3>Add New Video</h3>
         <form method="POST" enctype="multipart/form-data" id="uploadForm">
           <input type="hidden" name="action" value="upload">
           <input type="hidden" name="language" id="languageInput" value="en">
+          <input type="hidden" name="source_type" id="sourceTypeInput" value="file">
 
           <label>Title *</label>
           <input type="text" name="title" required placeholder="e.g. Self Introduction Practice">
@@ -615,10 +737,29 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
           <label>Sort order</label>
           <input type="number" name="sort_order" value="0">
 
-          <label>Video file * (MP4 / WebM)</label>
-          <input type="file" name="video" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov" required>
+          <label>Video Source *</label>
+          <div class="source-tabs" id="sourceTabs">
+            <div class="source-tab selected" data-source="file">📁 Upload File</div>
+            <div class="source-tab yt" data-source="youtube">▶️ YouTube Link</div>
+          </div>
 
-          <label>Thumbnail (optional)</label>
+          <!-- File pane -->
+          <div class="source-pane show" id="paneFile">
+            <label>Video file * (MP4 / WebM / MOV / MKV)</label>
+            <input type="file" name="video" id="videoFileInput" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.mkv" required>
+          </div>
+
+          <!-- YouTube pane -->
+          <div class="source-pane" id="paneYoutube">
+            <label>YouTube link *</label>
+            <input type="text" name="youtube_url" id="youtubeUrlInput" placeholder="https://www.youtube.com/watch?v=xxxxxxxxxxx">
+            <div class="yt-preview" id="ytPreview">
+              <img id="ytPreviewImg" src="" alt="">
+              <span id="ytPreviewText">Valid YouTube link ✅</span>
+            </div>
+          </div>
+
+          <label>Thumbnail (optional<span id="thumbHintYt" style="display:none;"> — නැත්නම් YouTube thumbnail auto use වෙනවා</span>)</label>
           <input type="file" name="thumbnail" accept="image/*">
 
           <button type="submit" class="btn btn-primary" id="uploadSubmitBtn">Upload Video</button>
@@ -642,7 +783,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
           <p style="color:var(--muted); font-size:13.5px;">No videos in database yet.</p>
         <?php else: ?>
 
-          <!-- ========== ONE CLEAN FORM FOR BULK DELETE ========== -->
           <form method="POST" id="bulkDeleteForm" onsubmit="return confirmBulkDelete();">
             <input type="hidden" name="action" value="bulk_delete">
 
@@ -659,19 +799,26 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
 
             <div class="vid-list" id="vidList">
               <?php foreach ($videos as $v):
-                $code = strtolower($v['language'] ?? 'en');
-                $meta = $langOptions[$code] ?? ['flag' => '🌐', 'label' => $code];
+                $code   = strtolower($v['language'] ?? 'en');
+                $meta   = $langOptions[$code] ?? ['flag' => '🌐', 'label' => $code];
+                $isYt   = (($v['source_type'] ?? 'file') === 'youtube');
+                $ytId   = $v['youtube_id'] ?? '';
               ?>
-                <div class="vid-item" data-lang="<?php echo htmlspecialchars($code); ?>">
-                  <!-- Checkbox -->
+                <div class="vid-item"
+                     data-lang="<?php echo htmlspecialchars($code); ?>"
+                     data-type="<?php echo $isYt ? 'youtube' : 'file'; ?>"
+                     data-path="<?php echo htmlspecialchars($v['video_path']); ?>"
+                     data-yt="<?php echo htmlspecialchars($ytId); ?>"
+                     data-title="<?php echo htmlspecialchars($v['title']); ?>">
+
                   <input type="checkbox" class="vid-check" name="selected_ids[]" value="<?php echo (int)$v['id']; ?>">
 
                   <?php if (!empty($v['thumbnail_path'])): ?>
-                    <img class="vid-thumb" src="<?php echo htmlspecialchars($v['thumbnail_path']); ?>" alt=""
-                         onclick="openVideoModal('<?php echo htmlspecialchars($v['video_path'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($v['title'], ENT_QUOTES); ?>')">
+                    <img class="vid-thumb" src="<?php echo htmlspecialchars($v['thumbnail_path']); ?>" alt="" loading="lazy"
+                         onclick="openVideoFromItem(this)">
                   <?php else: ?>
                     <div class="vid-thumb" style="display:flex;align-items:center;justify-content:center;background:#1a1a2e;color:#7dd3fc;"
-                         onclick="openVideoModal('<?php echo htmlspecialchars($v['video_path'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($v['title'], ENT_QUOTES); ?>')">▶</div>
+                         onclick="openVideoFromItem(this)">▶</div>
                   <?php endif; ?>
 
                   <div class="vid-info">
@@ -683,23 +830,23 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
                       <?php if (!empty($v['duration_label'])): ?>
                         <span><?php echo htmlspecialchars($v['duration_label']); ?></span>
                       <?php endif; ?>
+                      <?php if ($isYt): ?>
+                        <span class="badge yt">▶ YouTube</span>
+                      <?php endif; ?>
                       <span class="badge <?php echo htmlspecialchars($v['status']); ?>"><?php echo htmlspecialchars($v['status']); ?></span>
                     </div>
                   </div>
 
                   <div style="display:flex;flex-direction:column;gap:6px;min-width:88px;">
-                    <button type="button" class="btn btn-sm btn-view"
-                            onclick="openVideoModal('<?php echo htmlspecialchars($v['video_path'], ENT_QUOTES); ?>', '<?php echo htmlspecialchars($v['title'], ENT_QUOTES); ?>')">
+                    <button type="button" class="btn btn-sm btn-view" onclick="openVideoFromItem(this)">
                       ▶ View
                     </button>
 
-                    <!-- Single Toggle (no nested form) -->
                     <button type="button" class="btn btn-sm btn-ghost"
                             onclick="singleAction('toggle', <?php echo (int)$v['id']; ?>)">
                       <?php echo $v['status'] === 'active' ? 'Hide' : 'Show'; ?>
                     </button>
 
-                    <!-- Single Delete (no nested form) -->
                     <button type="button" class="btn btn-sm btn-danger"
                             onclick="singleAction('delete', <?php echo (int)$v['id']; ?>)">
                       Delete
@@ -715,7 +862,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   </div>
 </div>
 
-<!-- Video preview modal -->
+<!-- Video preview modal (file + YouTube) -->
 <div class="video-modal-backdrop" id="videoModalBackdrop">
   <div class="video-modal">
     <div class="video-modal-head">
@@ -723,6 +870,9 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       <button type="button" class="video-modal-close" id="videoModalClose">✕</button>
     </div>
     <video id="videoModalPlayer" controls playsinline></video>
+    <iframe id="videoModalYoutube"
+            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share"
+            allowfullscreen referrerpolicy="strict-origin-when-cross-origin"></iframe>
   </div>
 </div>
 
@@ -792,6 +942,81 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     });
   });
 
+  // ===== Source toggle (File / YouTube) =====
+  const sourceTypeInput  = document.getElementById('sourceTypeInput');
+  const paneFile         = document.getElementById('paneFile');
+  const paneYoutube      = document.getElementById('paneYoutube');
+  const videoFileInput   = document.getElementById('videoFileInput');
+  const youtubeUrlInput  = document.getElementById('youtubeUrlInput');
+  const uploadSubmitBtn  = document.getElementById('uploadSubmitBtn');
+  const thumbHintYt      = document.getElementById('thumbHintYt');
+  const ytPreview        = document.getElementById('ytPreview');
+  const ytPreviewImg     = document.getElementById('ytPreviewImg');
+  const ytPreviewText    = document.getElementById('ytPreviewText');
+
+  function setSource(source) {
+    sourceTypeInput.value = source;
+    document.querySelectorAll('.source-tab').forEach(t => {
+      t.classList.toggle('selected', t.dataset.source === source);
+    });
+    if (source === 'youtube') {
+      paneFile.classList.remove('show');
+      paneYoutube.classList.add('show');
+      videoFileInput.required = false;
+      videoFileInput.value = '';
+      youtubeUrlInput.required = true;
+      thumbHintYt.style.display = 'inline';
+      uploadSubmitBtn.textContent = 'Add YouTube Video';
+    } else {
+      paneYoutube.classList.remove('show');
+      paneFile.classList.add('show');
+      youtubeUrlInput.required = false;
+      videoFileInput.required = true;
+      thumbHintYt.style.display = 'none';
+      uploadSubmitBtn.textContent = 'Upload Video';
+    }
+  }
+
+  document.querySelectorAll('.source-tab').forEach(tab => {
+    tab.addEventListener('click', () => setSource(tab.dataset.source));
+  });
+
+  // Parse YouTube ID on the client (for live preview)
+  function parseYoutubeId(input) {
+    input = (input || '').trim();
+    if (!input) return '';
+    if (/^[A-Za-z0-9_-]{11}$/.test(input)) return input;
+    try {
+      const u = new URL(/^https?:\/\//i.test(input) ? input : 'https://' + input);
+      const host = u.hostname.replace(/^www\./, '').toLowerCase();
+      let id = '';
+      if (host === 'youtu.be') {
+        id = u.pathname.split('/').filter(Boolean)[0] || '';
+      } else if (['youtube.com','m.youtube.com','music.youtube.com','youtube-nocookie.com'].includes(host)) {
+        const m = u.pathname.match(/^\/(embed|shorts|live|v)\/([A-Za-z0-9_-]{11})/);
+        id = m ? m[2] : (u.searchParams.get('v') || '');
+      }
+      return /^[A-Za-z0-9_-]{11}$/.test(id) ? id : '';
+    } catch (e) { return ''; }
+  }
+
+  youtubeUrlInput.addEventListener('input', () => {
+    const val = youtubeUrlInput.value.trim();
+    if (!val) { ytPreview.classList.remove('show'); return; }
+    const id = parseYoutubeId(val);
+    if (id) {
+      ytPreviewImg.src = 'https://img.youtube.com/vi/' + id + '/mqdefault.jpg';
+      ytPreviewText.textContent = 'Valid YouTube link ✅  (ID: ' + id + ')';
+      ytPreviewText.style.color = 'var(--success)';
+      ytPreview.classList.add('show');
+    } else {
+      ytPreviewImg.removeAttribute('src');
+      ytPreviewText.textContent = 'Invalid YouTube link ❌';
+      ytPreviewText.style.color = 'var(--danger)';
+      ytPreview.classList.add('show');
+    }
+  });
+
   // ===== Select All + Count =====
   const selectAll = document.getElementById('selectAll');
   const checkboxes = () => document.querySelectorAll('.vid-check');
@@ -820,7 +1045,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     }
   });
 
-  // Confirm bulk delete
   window.confirmBulkDelete = function() {
     const count = document.querySelectorAll('.vid-check:checked').length;
     if (count === 0) {
@@ -830,7 +1054,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     return confirm('Are you sure you want to delete ' + count + ' selected video(s)?\nThis cannot be undone.');
   };
 
-  // ===== Single action (Toggle / Delete) - no nested form =====
+  // ===== Single action (Toggle / Delete) =====
   window.singleAction = function(action, id) {
     if (action === 'delete') {
       if (!confirm('Delete this video?')) return;
@@ -856,27 +1080,50 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     document.getElementById('sidebarBackdrop').classList.remove('show');
   });
 
-document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  window.location.href = 'admin_logout.php';
-});
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    window.location.href = 'admin_logout.php';
+  });
 
-  // Video modal
+  // ===== Video modal (file + YouTube) =====
   const videoModalBackdrop = document.getElementById('videoModalBackdrop');
   const videoModalPlayer   = document.getElementById('videoModalPlayer');
+  const videoModalYoutube  = document.getElementById('videoModalYoutube');
   const videoModalTitle    = document.getElementById('videoModalTitle');
   const videoModalClose    = document.getElementById('videoModalClose');
 
-  window.openVideoModal = function(path, title) {
-    videoModalPlayer.src = path;
-    videoModalTitle.textContent = title || 'Video';
+  function openVideoModal(item) {
+    videoModalTitle.textContent = item.title || 'Video';
+
+    if (item.type === 'youtube' && item.yt) {
+      videoModalPlayer.style.display = 'none';
+      videoModalYoutube.style.display = 'block';
+      videoModalYoutube.src = 'https://www.youtube-nocookie.com/embed/' + encodeURIComponent(item.yt) + '?autoplay=1&rel=0';
+    } else {
+      videoModalYoutube.style.display = 'none';
+      videoModalYoutube.removeAttribute('src');
+      videoModalPlayer.style.display = 'block';
+      videoModalPlayer.src = item.path;
+      videoModalPlayer.play().catch(() => {});
+    }
     videoModalBackdrop.classList.add('show');
-    videoModalPlayer.play().catch(() => {});
+  }
+
+  window.openVideoFromItem = function(el) {
+    const row = el.closest('.vid-item');
+    if (!row) return;
+    openVideoModal({
+      type:  row.dataset.type,
+      path:  row.dataset.path,
+      yt:    row.dataset.yt,
+      title: row.dataset.title
+    });
   };
 
   function closeVideoModal() {
     videoModalPlayer.pause();
     videoModalPlayer.removeAttribute('src');
     videoModalPlayer.load();
+    videoModalYoutube.removeAttribute('src');   // stops YouTube playback
     videoModalBackdrop.classList.remove('show');
   }
 
@@ -888,9 +1135,8 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
     if (e.key === 'Escape') closeVideoModal();
   });
 
-  // ===== Upload progress (AJAX + XHR upload progress) =====
+  // ===== Upload progress (AJAX + XHR) — only for FILE mode =====
   const uploadForm        = document.getElementById('uploadForm');
-  const uploadSubmitBtn   = document.getElementById('uploadSubmitBtn');
   const uploadModal       = document.getElementById('uploadModalBackdrop');
   const uploadBarFill     = document.getElementById('uploadBarFill');
   const uploadRingBar     = document.getElementById('uploadRingBar');
@@ -898,7 +1144,7 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
   const uploadStatusText  = document.getElementById('uploadStatusText');
   const uploadStatusSub   = document.getElementById('uploadStatusSub');
 
-  const RING_CIRCUMFERENCE = 2 * Math.PI * 48; // r=48
+  const RING_CIRCUMFERENCE = 2 * Math.PI * 48;
 
   function bytesToMB(bytes) {
     return (bytes / (1024 * 1024)).toFixed(1);
@@ -928,10 +1174,23 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
 
   if (uploadForm) {
     uploadForm.addEventListener('submit', function (e) {
+
+      // ---- YouTube mode: validate + normal form submit (no progress needed) ----
+      if (sourceTypeInput.value === 'youtube') {
+        if (!parseYoutubeId(youtubeUrlInput.value)) {
+          e.preventDefault();
+          alert('Please enter a valid YouTube link.');
+          return;
+        }
+        uploadSubmitBtn.disabled = true;
+        uploadSubmitBtn.textContent = 'Saving...';
+        return; // let the browser submit normally
+      }
+
+      // ---- File mode: AJAX upload with progress ----
       e.preventDefault();
 
-      const fileInput = uploadForm.querySelector('input[name="video"]');
-      if (fileInput && fileInput.files.length === 0) {
+      if (videoFileInput && videoFileInput.files.length === 0) {
         alert('Please choose a video file first.');
         return;
       }
@@ -954,7 +1213,6 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
       });
 
       xhr.upload.addEventListener('load', function () {
-        // Upload bytes fully sent to server, server is now processing (DB insert, moving file, etc.)
         setUploadProgress(100);
         uploadStatusText.textContent = 'Processing on server...';
       });
@@ -962,8 +1220,6 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
       xhr.onload = function () {
         if (xhr.status >= 200 && xhr.status < 400) {
           uploadStatusText.textContent = 'Done!';
-          // Replace the whole page with the fresh server response
-          // so the success/error message + updated video list show correctly.
           document.open();
           document.write(xhr.responseText);
           document.close();
@@ -986,7 +1242,7 @@ document.getElementById('logoutBtn')?.addEventListener('click', () => {
     });
   }
 
-  // Badges (same as before)
+  // Badges
   const BADGE_POLL_INTERVAL_MS = 15000;
   async function updateBookingsBadge() {
     try {

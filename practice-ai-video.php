@@ -1,5 +1,7 @@
 <?php
 if (session_status() === PHP_SESSION_NONE) { session_start(); }
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
 require_once 'db.php';
 if (!isset($conn) || $conn === null) { die("Database connection failed."); }
 
@@ -77,12 +79,35 @@ if ($isLoggedIn && $hasActivePackage) {
     $check = $conn->query("SHOW TABLES LIKE 'practice_videos'");
     if ($check && $check->num_rows > 0) {
         $tableOk = true;
-        $stmtV = $conn->prepare("SELECT id, title, description, language, level, video_path, thumbnail_path, duration_label FROM practice_videos WHERE status = 'active' AND LOWER(language) = LOWER(?) ORDER BY sort_order ASC, id ASC");
+
+        // YouTube support columns (added by admin page migration) - check so page never breaks
+        $hasSrcCol = false;
+        $colChk = $conn->query("SHOW COLUMNS FROM practice_videos LIKE 'source_type'");
+        if ($colChk && $colChk->num_rows > 0) { $hasSrcCol = true; }
+
+        $cols = "id, title, description, language, level, video_path, thumbnail_path, duration_label";
+        if ($hasSrcCol) { $cols .= ", source_type, youtube_id"; }
+
+        $stmtV = $conn->prepare("SELECT $cols FROM practice_videos WHERE status = 'active' AND LOWER(language) = LOWER(?) ORDER BY sort_order ASC, id ASC");
         if ($stmtV) {
             $stmtV->bind_param('s', $currentLang);
             $stmtV->execute();
             $resV = $stmtV->get_result();
-            while ($v = $resV->fetch_assoc()) { $videos[] = $v; }
+            while ($v = $resV->fetch_assoc()) {
+                if (!isset($v['source_type']) || $v['source_type'] === null || $v['source_type'] === '') {
+                    $v['source_type'] = 'file';
+                }
+                if (!isset($v['youtube_id'])) { $v['youtube_id'] = null; }
+
+                // Fallback: if a YouTube URL is stored in video_path, always treat it as YouTube
+                if (($v['source_type'] !== 'youtube' || empty($v['youtube_id'])) && preg_match('~^https?://~i', (string)$v['video_path'])) {
+                    if (preg_match('~(?:youtube\.com/(?:watch\?v=|embed/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{11})~i', $v['video_path'], $ym)) {
+                        $v['source_type'] = 'youtube';
+                        $v['youtube_id']  = $ym[1];
+                    }
+                }
+                $videos[] = $v;
+            }
             $stmtV->close();
         }
     }
@@ -108,7 +133,7 @@ if ($regRes && $regRow = $regRes->fetch_assoc()) {
 }
 $registerVideoJs = json_encode($registerVideo, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $conn->close();
-$videosJson = json_encode($videos);
+$videosJson = json_encode($videos, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 $tableMissing = $isLoggedIn && $hasActivePackage && !$tableOk;
 $checkoutUrl = 'ai-video-checkout.php?package_id=' . (int)($aiVideoPackageInfo['id'] ?? 0);
 $priceLabel = $aiVideoPackageInfo ? ' (Rs. ' . number_format((float)$aiVideoPackageInfo['price'], 2) . ')' : '';
@@ -175,8 +200,10 @@ a{color:inherit;text-decoration:none}
 .layout{display:grid;grid-template-columns:1.5fr 1fr;gap:22px;align-items:start;position:relative;z-index:1}
 .player-panel,.list-panel{background:var(--card);border:1px solid var(--line-soft);border-radius:var(--radius-lg);box-shadow:var(--shadow-card)}
 .player-panel{overflow:hidden}
-.player-wrap{background:#0f0c29;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center}
+.player-wrap{background:#0f0c29;aspect-ratio:16/9;display:flex;align-items:center;justify-content:center;position:relative}
 .player-wrap video{width:100%;height:100%;object-fit:contain;background:#000}
+.player-wrap #ytHost{display:none;width:100%;height:100%;background:#000}
+.player-wrap #ytHost iframe{width:100%;height:100%;border:0;display:block}
 .player-empty{color:#c4b5fd;text-align:center;padding:40px 20px}
 .player-empty svg{width:48px;height:48px;margin-bottom:12px;opacity:.7}
 .player-empty p{font-size:13.5px;font-weight:600;color:#94a3b8}
@@ -363,6 +390,7 @@ a{color:inherit;text-decoration:none}
           <p>List එකෙන් video එකක් select කරන්න</p>
         </div>
         <video id="mainVideo" controls playsinline style="display:none"></video>
+        <div id="ytHost"></div>
       </div>
       <div class="player-info" id="playerInfo" style="display:none">
         <h3 id="playerTitle">—</h3>
@@ -435,8 +463,6 @@ a{color:inherit;text-decoration:none}
     </div>
   </div>
 </div>
-  </main>
-</div>
 
 <!-- ==================== FOOTER ==================== -->
 <footer class="site-footer">
@@ -444,7 +470,6 @@ a{color:inherit;text-decoration:none}
   <span class="footer-copy">© <?php echo date('Y'); ?> Sipway Campus. All rights reserved.</span>
 </footer>
 
-<!-- ==================== HOW TO REGISTER VIDEO MODAL ==================== -->
 <script>
 const IS_LOGGED_IN=<?php echo $isLoggedIn?'true':'false';?>;
 const HAS_ACTIVE_PACKAGE=<?php echo $hasActivePackage?'true':'false';?>;
@@ -534,6 +559,32 @@ backdrop.onclick=()=>{sidebar.classList.remove('open');backdrop.classList.remove
 const userMenu=document.getElementById('userMenu');
 if(userMenu){const dd=document.getElementById('userDropdown');userMenu.onclick=e=>{dd.classList.toggle('show');e.stopPropagation()};document.onclick=()=>dd.classList.remove('show')}
 
+/* ===== YouTube IFrame API loader ===== */
+let ytPlayer=null, ytQueue=[], playToken=0;
+function loadYT(cb){
+  if(window.YT && window.YT.Player){cb();return}
+  ytQueue.push(cb);
+  if(!document.getElementById('ytApiScript')){
+    window.onYouTubeIframeAPIReady=function(){ytQueue.splice(0).forEach(f=>f())};
+    const s=document.createElement('script');
+    s.id='ytApiScript';
+    s.src='https://www.youtube.com/iframe_api';
+    document.head.appendChild(s);
+  }
+}
+
+const mainVideoEl=document.getElementById('mainVideo');
+const ytHostEl=document.getElementById('ytHost');
+
+function stopAllPlayers(){
+  try{mainVideoEl.pause()}catch(e){}
+  mainVideoEl.removeAttribute('src');
+  mainVideoEl.style.display='none';
+  if(ytPlayer){try{ytPlayer.destroy()}catch(e){} ytPlayer=null}
+  ytHostEl.innerHTML='';
+  ytHostEl.style.display='none';
+}
+
 let currentFilter='all',activeId=null;
 function renderList(){
   const list=document.getElementById('videoList');
@@ -549,12 +600,49 @@ function renderList(){
   updateProgressBar();
 }
 function showLockedMsg(){alert('මේ video එක තාම lock වෙලා තියෙනවා.\nපෙර video එක අවසානය දක්වා බලලා unlock කරගන්න.')}
+
 function playVideo(id){
   if(!IS_LOGGED_IN||!HAS_ACTIVE_PACKAGE){openAuthModal(false);return}
   const v=VIDEOS.find(x=>x.id==id);if(!v||!isUnlocked(id)){showLockedMsg();return}
   activeId=id;
-  const video=document.getElementById('mainVideo'),empty=document.getElementById('playerEmpty'),info=document.getElementById('playerInfo');
-  empty.style.display='none';video.style.display='block';video.src=v.video_path;video.load();video.play().catch(()=>{});
+  const token=++playToken;
+  const empty=document.getElementById('playerEmpty'),info=document.getElementById('playerInfo');
+
+  stopAllPlayers();
+  empty.style.display='none';
+
+  const isYt=(v.source_type==='youtube' && v.youtube_id);
+
+  if(isYt){
+    // ---- YouTube player (IFrame API, so we can detect "ended") ----
+    ytHostEl.style.display='block';
+    ytHostEl.innerHTML='<div id="ytPlayer"></div>';
+    const vid=v.id;
+    loadYT(function(){
+      if(token!==playToken) return; // user already switched video
+      ytPlayer=new YT.Player('ytPlayer',{
+        videoId:v.youtube_id,
+        width:'100%',
+        height:'100%',
+        playerVars:{autoplay:1,rel:0,playsinline:1,modestbranding:1},
+        events:{
+          onStateChange:function(e){
+            if(e.data===YT.PlayerState.ENDED){
+              markWatched(vid);
+              renderList();
+            }
+          }
+        }
+      });
+    });
+  } else {
+    // ---- Normal uploaded video file ----
+    mainVideoEl.style.display='block';
+    mainVideoEl.src=v.video_path;
+    mainVideoEl.load();
+    mainVideoEl.play().catch(()=>{});
+  }
+
   info.style.display='block';
   document.getElementById('playerTitle').textContent=v.title||'';
   document.getElementById('playerDesc').textContent=v.description||'';
@@ -565,7 +653,7 @@ function playVideo(id){
   renderList();
 }
 window.playVideo=playVideo;window.showLockedMsg=showLockedMsg;
-document.getElementById('mainVideo')?.addEventListener('ended',()=>{if(activeId!=null){markWatched(activeId);renderList()}});
+mainVideoEl?.addEventListener('ended',()=>{if(activeId!=null){markWatched(activeId);renderList()}});
 document.querySelectorAll('.filter-pill').forEach(p=>p.onclick=()=>{document.querySelectorAll('.filter-pill').forEach(x=>x.classList.remove('active'));p.classList.add('active');currentFilter=p.dataset.filter;renderList()});
 
 if(IS_LOGGED_IN&&HAS_ACTIVE_PACKAGE){renderList();const first=VIDEOS.find(v=>isUnlocked(v.id));if(first)playVideo(first.id)}

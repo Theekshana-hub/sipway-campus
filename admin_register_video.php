@@ -52,11 +52,12 @@ function parseVideoUrl($url) {
     $url = trim($url);
     if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) return null;
 
-    if (preg_match('~(?:youtube\.com/(?:watch\?v=|embed/|shorts/)|youtu\.be/)([A-Za-z0-9_-]{6,})~i', $url, $m)) {
+    if (preg_match('~(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{6,})~i', $url, $m)) {
         $id = $m[1];
         return [
             'type'      => 'youtube',
-            'embed_url' => "https://www.youtube.com/embed/{$id}",
+            'id'        => $id,
+            'embed_url' => "https://www.youtube-nocookie.com/embed/{$id}",
             'thumb_url' => "https://img.youtube.com/vi/{$id}/hqdefault.jpg",
         ];
     }
@@ -64,12 +65,14 @@ function parseVideoUrl($url) {
         $id = $m[1];
         return [
             'type'      => 'vimeo',
-            'embed_url' => "https://player.vimeo.com/video/{$id}",
+            'id'        => $id,
+            'embed_url' => "https://player.vimeo.com/video/{$id}?title=0&byline=0&portrait=0&badge=0&dnt=1",
             'thumb_url' => null,
         ];
     }
     return [
         'type'      => 'direct',
+        'id'        => null,
         'embed_url' => $url,
         'thumb_url' => null,
     ];
@@ -395,9 +398,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   }
   .current-box h4{ margin:0 0 8px; font-size:14px; color:var(--navy); }
   .current-box p{ margin:0; font-size:13px; color:var(--muted); }
-  .current-box video, .current-box iframe{
-    width:100%; max-height:280px; border-radius:10px; margin-top:12px; background:#000;
-  }
   .debug-box{
     font-size:12px; color:var(--muted); background:#fff;
     border:1px dashed var(--line); border-radius:10px; padding:10px 14px; margin-bottom:18px;
@@ -412,6 +412,51 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.error-toast{ background:var(--danger); }
+
+  /* =====================================================================
+     PROTECTED PLAYER  (CSS)  — copy this block to the student dashboard too
+     ===================================================================== */
+  .sp-player{
+    position:relative; width:100%; aspect-ratio:16/9; margin-top:12px;
+    background:#000; border-radius:10px; overflow:hidden;
+    user-select:none; -webkit-user-select:none;
+  }
+  /* iframe is taller than the video, extra area is cropped -> hides YouTube title bar / logo */
+  .sp-frame{ position:absolute; left:0; right:0; top:-15%; bottom:-15%; }
+  .sp-frame iframe{ width:100%; height:100%; border:0; display:block; }
+  /* invisible shield: blocks every click / hover reaching YouTube */
+  .sp-shield{ position:absolute; inset:0; z-index:3; cursor:pointer; }
+  /* cover hides YouTube's paused / end-screen overlays */
+  .sp-cover{
+    position:absolute; inset:0; z-index:2; background:#000 center/cover no-repeat;
+    opacity:0; pointer-events:none; transition:opacity .2s ease;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sp-player:not(.is-playing) .sp-cover{ opacity:.93; }
+  .sp-bigplay{
+    width:68px; height:68px; border-radius:50%;
+    background:rgba(232,130,95,0.95); display:flex; align-items:center; justify-content:center;
+    box-shadow:0 8px 24px rgba(0,0,0,0.35);
+  }
+  .sp-bigplay svg{ width:28px; height:28px; fill:#fff; margin-left:3px; }
+  .sp-controls{
+    position:absolute; left:0; right:0; bottom:0; z-index:4;
+    display:flex; align-items:center; gap:10px; padding:26px 12px 10px;
+    background:linear-gradient(to top, rgba(0,0,0,0.75), rgba(0,0,0,0));
+    color:#fff; font-size:12px; font-weight:600;
+  }
+  .sp-controls button{
+    background:none; border:none; color:#fff; cursor:pointer; padding:4px;
+    display:flex; align-items:center; justify-content:center;
+  }
+  .sp-controls button svg{ width:20px; height:20px; fill:#fff; }
+  .sp-controls .sp-time{ min-width:86px; text-align:center; font-variant-numeric:tabular-nums; }
+  .sp-controls input[type=range]{
+    flex:1; margin:0; padding:0; height:4px; border:none; accent-color:var(--coral); cursor:pointer;
+  }
+  .sp-player video{ width:100%; height:100%; display:block; background:#000; }
+  .sp-plain{ position:relative; width:100%; aspect-ratio:16/9; margin-top:12px; border-radius:10px; overflow:hidden; background:#000; }
+  .sp-plain iframe, .sp-plain video{ width:100%; height:100%; border:0; display:block; }
 
   @media (max-width:880px){
     :root{ --sidebar-w:230px; }
@@ -609,18 +654,51 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
         <?php
           $playerType = 'file';
           $playerSrc  = $current['video_path'] ?? '';
+          $playerId   = '';
           if ($current['source_type'] === 'link' && !empty($current['video_url'])) {
               $parsed = parseVideoUrl($current['video_url']);
               if ($parsed) {
                   $playerType = $parsed['type'];
                   $playerSrc  = $parsed['embed_url'];
+                  $playerId   = $parsed['id'] ?? '';
               }
           }
+          $poster = $current['thumbnail_path'] ?? '';
         ?>
-        <?php if ($playerType === 'youtube' || $playerType === 'vimeo'): ?>
-          <iframe src="<?php echo htmlspecialchars($playerSrc); ?>" allowfullscreen style="width:100%;aspect-ratio:16/9;border:none;border-radius:10px;margin-top:12px;"></iframe>
+
+        <?php if ($playerType === 'youtube' && $playerId): ?>
+          <!-- PROTECTED YOUTUBE PLAYER (HTML) — copy to the student dashboard -->
+          <div class="sp-player" data-yt-id="<?php echo htmlspecialchars($playerId); ?>">
+            <div class="sp-frame"><div class="sp-yt"></div></div>
+            <div class="sp-cover" style="<?php echo $poster ? "background-image:url('" . htmlspecialchars($poster, ENT_QUOTES) . "')" : ''; ?>">
+              <div class="sp-bigplay"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg></div>
+            </div>
+            <div class="sp-shield"></div>
+            <div class="sp-controls">
+              <button type="button" class="sp-btn-play" aria-label="Play / Pause">
+                <svg viewBox="0 0 24 24"><path class="sp-ico-play" d="M8 5v14l11-7z"/></svg>
+              </button>
+              <input type="range" class="sp-seek" min="0" max="1000" value="0">
+              <span class="sp-time">0:00 / 0:00</span>
+              <button type="button" class="sp-btn-mute" aria-label="Mute">
+                <svg viewBox="0 0 24 24"><path class="sp-ico-vol" d="M3 9v6h4l5 5V4L7 9H3z"/></svg>
+              </button>
+              <button type="button" class="sp-btn-fs" aria-label="Fullscreen">
+                <svg viewBox="0 0 24 24"><path d="M7 14H5v5h5v-2H7v-3zm-2-4h2V7h3V5H5v5zm12 7h-3v2h5v-5h-2v3zM14 5v2h3v3h2V5h-5z"/></svg>
+              </button>
+            </div>
+          </div>
+
+        <?php elseif ($playerType === 'vimeo'): ?>
+          <div class="sp-plain">
+            <iframe src="<?php echo htmlspecialchars($playerSrc); ?>" allow="autoplay; fullscreen" allowfullscreen></iframe>
+          </div>
+
         <?php elseif ($playerSrc): ?>
-          <video controls playsinline src="<?php echo htmlspecialchars($playerSrc); ?>" style="width:100%;max-height:280px;border-radius:10px;margin-top:12px;background:#000;"></video>
+          <div class="sp-plain">
+            <video controls playsinline controlsList="nodownload noremoteplayback" disablePictureInPicture
+                   oncontextmenu="return false;" src="<?php echo htmlspecialchars($playerSrc); ?>"></video>
+          </div>
         <?php endif; ?>
 
         <form method="POST" style="margin-top:14px;" onsubmit="return confirm('Delete this register guide video?');">
@@ -672,6 +750,127 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
 <div class="toast" id="toast"></div>
 
 <script>
+/* =====================================================================
+   PROTECTED YOUTUBE PLAYER (JS) — copy this block to the student dashboard too
+   Uses the YouTube IFrame API with all native controls turned off and
+   an invisible shield on top, so students can't click through to YouTube.
+   ===================================================================== */
+(function(){
+  const players = document.querySelectorAll('.sp-player[data-yt-id]');
+  if (!players.length) return;
+
+  const tag = document.createElement('script');
+  tag.src = 'https://www.youtube.com/iframe_api';
+  document.head.appendChild(tag);
+
+  function fmt(s){
+    s = Math.max(0, Math.floor(s || 0));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
+
+  function setup(el){
+    const id       = el.dataset.ytId;
+    const shield   = el.querySelector('.sp-shield');
+    const btnPlay  = el.querySelector('.sp-btn-play');
+    const btnMute  = el.querySelector('.sp-btn-mute');
+    const btnFs    = el.querySelector('.sp-btn-fs');
+    const seek     = el.querySelector('.sp-seek');
+    const timeEl   = el.querySelector('.sp-time');
+    const icoPlay  = el.querySelector('.sp-ico-play');
+    const icoVol   = el.querySelector('.sp-ico-vol');
+    let seeking = false, timer = null;
+
+    const PLAY_D  = 'M8 5v14l11-7z';
+    const PAUSE_D = 'M6 5h4v14H6zm8 0h4v14h-4z';
+    const VOL_D   = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z';
+    const MUTE_D  = 'M16.5 12A4.5 4.5 0 0 0 14 8v2.2l2.5 2.5V12zM19 12a7 7 0 0 1-.9 3.4l1.5 1.5A9 9 0 0 0 21 12a9 9 0 0 0-7-8.8v2.1A7 7 0 0 1 19 12zM4.3 3L3 4.3 7.7 9H3v6h4l5 5v-6.7l4.2 4.2c-.7.5-1.4.9-2.2 1.1v2.1a9 9 0 0 0 3.6-1.8l2.1 2.1 1.3-1.3L4.3 3zM12 4L9.9 6.1 12 8.2V4z';
+
+    const yt = new YT.Player(el.querySelector('.sp-yt'), {
+      host: 'https://www.youtube-nocookie.com',
+      videoId: id,
+      playerVars: {
+        controls: 0,        // hide native controls
+        rel: 0,             // no related videos from other channels
+        modestbranding: 1,  // minimal YouTube branding
+        disablekb: 1,       // no keyboard shortcuts
+        fs: 0,              // no native fullscreen button
+        iv_load_policy: 3,  // hide annotations
+        playsinline: 1,
+        cc_load_policy: 0,
+        origin: location.origin
+      },
+      events: {
+        onReady: function(){
+          timeEl.textContent = '0:00 / ' + fmt(yt.getDuration());
+        },
+        onStateChange: function(e){
+          const S = YT.PlayerState;
+          const playing = (e.data === S.PLAYING || e.data === S.BUFFERING);
+          el.classList.toggle('is-playing', playing);
+          icoPlay.setAttribute('d', playing ? PAUSE_D : PLAY_D);
+          if (e.data === S.ENDED) {
+            // go back to start & pause so YouTube's end-screen suggestions never show
+            yt.seekTo(0, true);
+            yt.pauseVideo();
+          }
+          if (playing) {
+            if (!timer) timer = setInterval(tick, 250);
+          } else if (timer) {
+            clearInterval(timer); timer = null; tick();
+          }
+        }
+      }
+    });
+
+    function tick(){
+      if (!yt.getDuration) return;
+      const d = yt.getDuration() || 0, c = yt.getCurrentTime() || 0;
+      if (!seeking && d) seek.value = Math.round((c / d) * 1000);
+      timeEl.textContent = fmt(c) + ' / ' + fmt(d);
+    }
+
+    function toggle(){
+      const s = yt.getPlayerState();
+      if (s === YT.PlayerState.PLAYING || s === YT.PlayerState.BUFFERING) yt.pauseVideo();
+      else yt.playVideo();
+    }
+
+    shield.addEventListener('click', toggle);
+    btnPlay.addEventListener('click', toggle);
+    el.addEventListener('contextmenu', function(e){ e.preventDefault(); });
+
+    seek.addEventListener('input', function(){
+      seeking = true;
+      const d = yt.getDuration() || 0;
+      timeEl.textContent = fmt((seek.value / 1000) * d) + ' / ' + fmt(d);
+    });
+    seek.addEventListener('change', function(){
+      const d = yt.getDuration() || 0;
+      yt.seekTo((seek.value / 1000) * d, true);
+      seeking = false;
+    });
+
+    btnMute.addEventListener('click', function(){
+      if (yt.isMuted()) { yt.unMute(); icoVol.setAttribute('d', VOL_D); }
+      else { yt.mute(); icoVol.setAttribute('d', MUTE_D); }
+    });
+
+    btnFs.addEventListener('click', function(){
+      const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
+      if (fsEl) {
+        (document.exitFullscreen || document.webkitExitFullscreen).call(document);
+      } else {
+        (el.requestFullscreen || el.webkitRequestFullscreen).call(el);
+      }
+    });
+  }
+
+  window.onYouTubeIframeAPIReady = function(){
+    players.forEach(setup);
+  };
+})();
+
+/* ===================== Admin page logic ===================== */
 (function(){
   const BADGE_POLL_INTERVAL_MS = 15000;
 
@@ -805,9 +1004,9 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebarBackdrop').classList.remove('show');
   });
-document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  window.location.href = 'admin_logout.php';
-});
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    window.location.href = 'admin_logout.php';
+  });
 })();
 </script>
 </body>
