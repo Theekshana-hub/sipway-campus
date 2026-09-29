@@ -159,7 +159,7 @@ a{color:inherit;text-decoration:none}
 .burger{background:none;border:none;cursor:pointer;padding:8px;display:flex;border-radius:10px;color:#e0e7ff}
 .burger svg{width:22px;height:22px}
 .logo{display:flex;align-items:center;gap:10px;font-weight:800;color:#fff;font-size:15.5px}
-.logo-image{width:80px;height:80px;object-fit:contain;border-radius:10px}
+.logo-image{width:100px;height:100px;object-fit:contain;border-radius:10px}
 .lang-nav-badge{display:flex;align-items:center;gap:8px;padding:5px 14px 5px 8px;border-radius:999px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.1);margin-left:6px}
 .lang-flag-img{width:26px;height:18px;object-fit:cover;border-radius:3px}
 .lang-nav-label{font-size:12.5px;font-weight:800;color:#fff}
