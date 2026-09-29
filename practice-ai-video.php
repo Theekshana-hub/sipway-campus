@@ -204,6 +204,25 @@ a{color:inherit;text-decoration:none}
 .player-wrap video{width:100%;height:100%;object-fit:contain;background:#000}
 .player-wrap #ytHost{display:none;width:100%;height:100%;background:#000}
 .player-wrap #ytHost iframe{width:100%;height:100%;border:0;display:block}
+/* ===== Custom YouTube UI (no redirect to youtube.com) ===== */
+#ytShield,#ytCover,#ytControls{display:none}
+.player-wrap.yt-mode{overflow:hidden}
+.player-wrap.yt-mode #ytHost{position:absolute;inset:0;z-index:1}
+.player-wrap.yt-mode #ytShield{display:block;position:absolute;inset:0;z-index:3;cursor:pointer;background:transparent}
+.player-wrap.yt-mode #ytCover{display:flex;position:absolute;inset:0;z-index:2;flex-direction:column;align-items:center;justify-content:center;gap:12px;background-color:#0f0c29;background-size:cover;background-position:center;color:#fff;opacity:0;pointer-events:none;transition:opacity .2s}
+.player-wrap.yt-mode #ytCover.show{opacity:1}
+#ytCoverBig{width:74px;height:74px;border-radius:50%;background:linear-gradient(135deg,#a855f7,#ec4899);display:flex;align-items:center;justify-content:center;font-size:30px;box-shadow:0 12px 30px -6px rgba(168,85,247,.6)}
+#ytCoverText{font-size:13px;font-weight:700;text-align:center;padding:0 16px}
+.player-wrap.yt-mode #ytControls{display:flex;position:absolute;left:0;right:0;bottom:0;z-index:4;align-items:center;gap:10px;padding:28px 14px 10px;background:linear-gradient(transparent,rgba(0,0,0,.78));opacity:0;pointer-events:none;transition:opacity .2s}
+.player-wrap.yt-mode.show-ctl #ytControls,.player-wrap.yt-mode.yt-paused #ytControls{opacity:1;pointer-events:auto}
+#ytControls button{background:none;border:none;color:#fff;font-size:18px;cursor:pointer;padding:4px 6px;line-height:1}
+#ytControls input[type=range]{margin:0;accent-color:#ec4899;cursor:pointer;height:4px}
+#ytSeek{flex:1;min-width:0}
+#ytVol{width:72px}
+#ytTime{color:#fff;font-size:12px;font-weight:700;white-space:nowrap;font-variant-numeric:tabular-nums}
+.player-wrap:fullscreen{aspect-ratio:auto;width:100vw;height:100vh}
+.player-wrap:-webkit-full-screen{aspect-ratio:auto;width:100vw;height:100vh}
+@media(max-width:560px){#ytVol{display:none}}
 .player-empty{color:#c4b5fd;text-align:center;padding:40px 20px}
 .player-empty svg{width:48px;height:48px;margin-bottom:12px;opacity:.7}
 .player-empty p{font-size:13.5px;font-weight:600;color:#94a3b8}
@@ -391,6 +410,16 @@ a{color:inherit;text-decoration:none}
         </div>
         <video id="mainVideo" controls playsinline style="display:none"></video>
         <div id="ytHost"></div>
+        <div id="ytCover"><div id="ytCoverBig">▶</div><div id="ytCoverText">Loading video…</div></div>
+        <div id="ytShield"></div>
+        <div id="ytControls">
+          <button type="button" id="ytPlayBtn" title="Play / Pause">▶</button>
+          <span id="ytTime">0:00 / 0:00</span>
+          <input type="range" id="ytSeek" min="0" max="1000" value="0">
+          <button type="button" id="ytMuteBtn" title="Mute">🔊</button>
+          <input type="range" id="ytVol" min="0" max="100" value="100">
+          <button type="button" id="ytFsBtn" title="Fullscreen">⛶</button>
+        </div>
       </div>
       <div class="player-info" id="playerInfo" style="display:none">
         <h3 id="playerTitle">—</h3>
@@ -576,13 +605,109 @@ function loadYT(cb){
 const mainVideoEl=document.getElementById('mainVideo');
 const ytHostEl=document.getElementById('ytHost');
 
+/* ===== Custom YouTube controls (video plays only inside our page) ===== */
+const ytWrap=document.getElementById('playerWrap');
+const ytCover=document.getElementById('ytCover');
+const ytCoverBig=document.getElementById('ytCoverBig');
+const ytCoverText=document.getElementById('ytCoverText');
+const ytShield=document.getElementById('ytShield');
+const ytPlayBtn=document.getElementById('ytPlayBtn');
+const ytSeek=document.getElementById('ytSeek');
+const ytTimeEl=document.getElementById('ytTime');
+const ytMuteBtn=document.getElementById('ytMuteBtn');
+const ytVolEl=document.getElementById('ytVol');
+const ytFsBtn=document.getElementById('ytFsBtn');
+let ytTimer=null, ytUserSeeking=false, ytIdleTimer=null, ytState='idle';
+
+function fmtTime(s){s=Math.max(0,Math.floor(s||0));return Math.floor(s/60)+':'+String(s%60).padStart(2,'0')}
+
+function setYtUiState(state,v){
+  ytState=state;
+  if(v){
+    const img=v.thumbnail_path||('https://img.youtube.com/vi/'+v.youtube_id+'/hqdefault.jpg');
+    ytCover.style.backgroundImage="linear-gradient(rgba(15,12,41,.75),rgba(15,12,41,.75)),url('"+String(img).replace(/'/g,'%27')+"')";
+  }
+  const playing=(state==='playing');
+  ytCover.classList.toggle('show',!playing);
+  ytWrap.classList.toggle('yt-paused',!playing);
+  ytPlayBtn.textContent=playing?'⏸':(state==='ended'?'↻':'▶');
+  ytCoverBig.textContent=state==='ended'?'↻':(state==='loading'?'…':'▶');
+  ytCoverText.textContent=state==='ended'?'Video finished ✓ — click to replay':(state==='loading'?'Loading video…':'Click to play');
+}
+
+function ytToggle(){
+  if(!ytPlayer||!ytPlayer.getPlayerState) return;
+  if(ytState==='ended'){ytPlayer.seekTo(0,true);ytPlayer.playVideo();return}
+  const st=ytPlayer.getPlayerState();
+  if(st===YT.PlayerState.PLAYING||st===YT.PlayerState.BUFFERING) ytPlayer.pauseVideo(); else ytPlayer.playVideo();
+}
+
+function ytShowControls(){
+  ytWrap.classList.add('show-ctl');
+  clearTimeout(ytIdleTimer);
+  ytIdleTimer=setTimeout(()=>ytWrap.classList.remove('show-ctl'),2500);
+}
+
+function ytToggleFullscreen(){
+  const fsEl=document.fullscreenElement||document.webkitFullscreenElement;
+  if(fsEl){(document.exitFullscreen||document.webkitExitFullscreen).call(document)}
+  else{(ytWrap.requestFullscreen||ytWrap.webkitRequestFullscreen).call(ytWrap)}
+}
+
+function startYtTimer(){
+  clearInterval(ytTimer);
+  ytTimer=setInterval(()=>{
+    if(!ytPlayer||!ytPlayer.getCurrentTime||ytUserSeeking) return;
+    const d=ytPlayer.getDuration()||0,c=ytPlayer.getCurrentTime()||0;
+    ytSeek.value=d?Math.round(c/d*1000):0;
+    ytTimeEl.textContent=fmtTime(c)+' / '+fmtTime(d);
+  },300);
+}
+
+ytShield.addEventListener('click',()=>{ytToggle();ytShowControls()});
+ytShield.addEventListener('dblclick',ytToggleFullscreen);
+ytShield.addEventListener('contextmenu',e=>e.preventDefault());
+ytWrap.addEventListener('mousemove',()=>{if(ytWrap.classList.contains('yt-mode'))ytShowControls()});
+ytWrap.addEventListener('touchstart',()=>{if(ytWrap.classList.contains('yt-mode'))ytShowControls()},{passive:true});
+ytPlayBtn.addEventListener('click',ytToggle);
+ytFsBtn.addEventListener('click',ytToggleFullscreen);
+ytSeek.addEventListener('input',()=>{
+  ytUserSeeking=true;
+  if(ytPlayer&&ytPlayer.getDuration){
+    const d=ytPlayer.getDuration()||0;
+    ytTimeEl.textContent=fmtTime(d*ytSeek.value/1000)+' / '+fmtTime(d);
+  }
+});
+ytSeek.addEventListener('change',()=>{
+  if(ytPlayer&&ytPlayer.getDuration){ytPlayer.seekTo((ytPlayer.getDuration()||0)*ytSeek.value/1000,true)}
+  ytUserSeeking=false;
+});
+ytVolEl.addEventListener('input',()=>{
+  if(!ytPlayer||!ytPlayer.setVolume) return;
+  const val=Number(ytVolEl.value);
+  ytPlayer.setVolume(val);
+  if(val>0&&ytPlayer.isMuted&&ytPlayer.isMuted()) ytPlayer.unMute();
+  ytMuteBtn.textContent=val===0?'🔇':'🔊';
+});
+ytMuteBtn.addEventListener('click',()=>{
+  if(!ytPlayer||!ytPlayer.isMuted) return;
+  if(ytPlayer.isMuted()){ytPlayer.unMute();ytMuteBtn.textContent='🔊'}
+  else{ytPlayer.mute();ytMuteBtn.textContent='🔇'}
+});
+
 function stopAllPlayers(){
   try{mainVideoEl.pause()}catch(e){}
   mainVideoEl.removeAttribute('src');
   mainVideoEl.style.display='none';
+  clearInterval(ytTimer);
+  clearTimeout(ytIdleTimer);
   if(ytPlayer){try{ytPlayer.destroy()}catch(e){} ytPlayer=null}
   ytHostEl.innerHTML='';
   ytHostEl.style.display='none';
+  ytWrap.classList.remove('yt-mode','yt-paused','show-ctl');
+  ytState='idle';
+  ytSeek.value=0;
+  ytTimeEl.textContent='0:00 / 0:00';
 }
 
 let currentFilter='all',activeId=null;
@@ -614,7 +739,9 @@ function playVideo(id){
   const isYt=(v.source_type==='youtube' && v.youtube_id);
 
   if(isYt){
-    // ---- YouTube player (IFrame API, so we can detect "ended") ----
+    // ---- YouTube player: controls hidden, all clicks blocked by shield, custom UI ----
+    ytWrap.classList.add('yt-mode');
+    setYtUiState('loading',v);
     ytHostEl.style.display='block';
     ytHostEl.innerHTML='<div id="ytPlayer"></div>';
     const vid=v.id;
@@ -624,10 +751,30 @@ function playVideo(id){
         videoId:v.youtube_id,
         width:'100%',
         height:'100%',
-        playerVars:{autoplay:1,rel:0,playsinline:1,modestbranding:1},
+        host:'https://www.youtube-nocookie.com',
+        playerVars:{
+          autoplay:1,
+          controls:0,
+          disablekb:1,
+          fs:0,
+          iv_load_policy:3,
+          modestbranding:1,
+          rel:0,
+          playsinline:1,
+          cc_load_policy:0,
+          origin:location.origin
+        },
         events:{
+          onReady:function(){
+            try{ytPlayer.setVolume(Number(ytVolEl.value))}catch(e){}
+            startYtTimer();
+          },
           onStateChange:function(e){
-            if(e.data===YT.PlayerState.ENDED){
+            const S=YT.PlayerState;
+            if(e.data===S.PLAYING){ setYtUiState('playing'); }
+            else if(e.data===S.PAUSED){ setYtUiState('paused'); }
+            else if(e.data===S.ENDED){
+              setYtUiState('ended');
               markWatched(vid);
               renderList();
             }
