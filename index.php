@@ -2,62 +2,13 @@
 
 session_start();
 
-// --- Mobile gate: figure out if we still need to ask -------------------
-// Previously this only checked $_SESSION['gate_mobile'], so the popup
-// popped up again every time the PHP session ended (new browser session,
-// browser closed, session cookie expired, etc). Now we also remember it
-// with a long-lived cookie, and we skip it completely for anyone who is
-// already logged in (we already have their mobile number from registration).
-
-$alreadyLoggedIn  = isset($_SESSION['student_id']);
-$hasMobileSession = !empty($_SESSION['gate_mobile']);
-$hasMobileCookie  = !empty($_COOKIE['gate_mobile']);
-$hasSkipped       = !empty($_SESSION['gate_mobile_skipped']) || !empty($_COOKIE['gate_mobile_skip']);
-
-// If the cookie survived but the session didn't, resync the session from it.
-if ($hasMobileCookie && !$hasMobileSession) {
-    $_SESSION['gate_mobile'] = $_COOKIE['gate_mobile'];
-    $hasMobileSession = true;
-}
-
-$needsMobile = !$alreadyLoggedIn && !$hasMobileSession && !$hasSkipped;
-
-// AJAX: user clicked the "Cancel" button on the popup — don't ask again today
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_skip'])) {
-    $_SESSION['gate_mobile_skipped'] = true;
-    setcookie('gate_mobile_skip', '1', time() + 86400, '/'); // 1 day
-    header('Content-Type: application/json');
-    echo json_encode(['success' => true]);
-    exit;
-}
-
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_mobile'])) {
-    $mobile = preg_replace('/\D/', '', trim($_POST['gate_mobile']));
-    
-    if (preg_match('/^0\d{9}$/', $mobile)) {
-        $_SESSION['gate_mobile'] = $mobile;
-        setcookie('gate_mobile', $mobile, time() + 60 * 60 * 24 * 365, '/'); // remember for 1 year
-        $needsMobile = false;
-
-       
-        require_once 'db.php';   
-        
-        if (isset($conn) && $conn) {
-            $ip  = $_SERVER['REMOTE_ADDR'] ?? null;
-            $ua  = $_SERVER['HTTP_USER_AGENT'] ?? null;
-            
-            $stmt = $conn->prepare("INSERT INTO mobile_gate_logs (mobile, ip_address, user_agent) VALUES (?, ?, ?)");
-            $stmt->bind_param("sss", $mobile, $ip, $ua);
-            $stmt->execute();
-            $stmt->close();
-        }
-       
-
-        
-        header('Location: ' . $_SERVER['PHP_SELF']);
-        exit;
-    }
-}
+// --- New website popup -------------------------------------------------
+// The old "mobile number" popup has been removed completely.
+// Now a popup with a 10 -> 1 countdown is shown. When the countdown ends,
+// the button becomes active and takes the visitor to the new website.
+// Set $showNewSitePopup = false to turn the popup off.
+$showNewSitePopup = true;
+$newSiteUrl       = 'https://your-new-website.com';   // <-- put your new website link here
 
 $reminderLockFile = __DIR__ . '/reminder_lock.txt';
 $now = time();
@@ -180,25 +131,14 @@ if ($isLoggedIn) {
     $stmt3->close();
 
    
-$stmtPkg = $conn->prepare("
-    SELECT ap.id, ap.package_name, ap.package_type, p.package_name AS pkg_name
-    FROM activated_packages ap
-    LEFT JOIN packages p ON p.id = ap.package_id
-    WHERE ap.student_id = ? AND ap.status = 'active' AND ap.sessions_remaining > 0
-    LIMIT 1
-");
-$stmtPkg->bind_param("i", $studentId);
-$stmtPkg->execute();
-$resPkg = $stmtPkg->get_result();
-if ($rowPkg = $resPkg->fetch_assoc()) {
-    $hasActivePackage = true;
-    $activePackageSubject = $rowPkg['package_name'] ?: ($rowPkg['pkg_name'] ?? null);
-    $activePackageType = strtolower(trim($rowPkg['package_type'] ?? 'individual'));
-    if ($activePackageType !== 'group') {
-        $activePackageType = 'individual';
-    }
-}
-$stmtPkg->bind_param("i", $studentId);
+    $stmtPkg = $conn->prepare("
+        SELECT ap.id, ap.package_name, ap.package_type, p.package_name AS pkg_name
+        FROM activated_packages ap
+        LEFT JOIN packages p ON p.id = ap.package_id
+        WHERE ap.student_id = ? AND ap.status = 'active' AND ap.sessions_remaining > 0
+        LIMIT 1
+    ");
+    $stmtPkg->bind_param("i", $studentId);
     $stmtPkg->execute();
     $resPkg = $stmtPkg->get_result();
     if ($rowPkg = $resPkg->fetch_assoc()) {
@@ -2312,106 +2252,133 @@ $conn->close();
     30% { transform: translateY(-6px); opacity: 1; }
   }
 
-  /* ========== MOBILE GATE POPUP ========== */
-  .mobile-gate-overlay {
+  /* ========== NEW WEBSITE POPUP (10 -> 1 countdown) ========== */
+  @keyframes nsFloat { 0%,100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+  @keyframes nsGlow  { 0%,100% { box-shadow: 0 0 0 0 rgba(168,85,247,0.45); } 50% { box-shadow: 0 0 0 14px rgba(168,85,247,0); } }
+  @keyframes nsPop   { 0% { transform: scale(1); } 40% { transform: scale(1.18); } 100% { transform: scale(1); } }
+
+  .newsite-overlay {
     position: fixed;
     inset: 0;
-    background: rgba(15, 12, 41, 0.92);
+    background:
+      radial-gradient(circle at 20% 15%, rgba(168,85,247,0.35), transparent 45%),
+      radial-gradient(circle at 85% 85%, rgba(236,72,153,0.28), transparent 45%),
+      rgba(15, 12, 41, 0.94);
     backdrop-filter: blur(12px);
     z-index: 9999;
     display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
+    overflow-y: auto;
   }
-  .mobile-gate-box {
+  .newsite-box {
     background: #fff;
-    border-radius: 24px;
+    border-radius: 28px;
     width: 100%;
-    max-width: 420px;
-    padding: 36px 28px;
-    box-shadow: 0 40px 90px -20px rgba(0,0,0,0.5);
+    max-width: 440px;
+    padding: 40px 30px 30px;
+    box-shadow: 0 40px 90px -20px rgba(0,0,0,0.55);
     text-align: center;
-    animation: scaleIn .35s cubic-bezier(.34,1.56,.64,1);
+    position: relative;
+    overflow: hidden;
+    animation: scaleIn .4s cubic-bezier(.34,1.56,.64,1);
   }
-  .mobile-gate-box h2 {
-    font-size: 22px;
+  .newsite-box::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0; right: 0;
+    height: 6px;
+    background: linear-gradient(90deg, #a855f7, #ec4899, #f59e0b);
+  }
+  .newsite-rocket {
+    font-size: 54px;
+    line-height: 1;
+    margin-bottom: 12px;
+    display: inline-block;
+    animation: nsFloat 2.4s ease-in-out infinite;
+  }
+  .newsite-badge {
+    display: inline-block;
+    padding: 5px 14px;
+    border-radius: 999px;
+    background: linear-gradient(135deg, #a855f7, #ec4899);
+    color: #fff;
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+    text-transform: uppercase;
+    margin-bottom: 14px;
+  }
+  .newsite-box h2 {
+    font-size: 26px;
     font-weight: 800;
     color: #1e1b4b;
-    margin: 0 0 8px 0;
+    letter-spacing: -0.5px;
+    margin: 0 0 10px 0;
   }
-  .mobile-gate-box p {
+  .newsite-box p {
     font-size: 14px;
     color: #6b7280;
+    line-height: 1.6;
     margin: 0 0 24px 0;
-    line-height: 1.5;
   }
-  .mobile-gate-input {
+  .newsite-count-wrap {
+    width: 96px;
+    height: 96px;
+    margin: 0 auto 22px;
+    position: relative;
+  }
+  .newsite-ring {
+    width: 96px;
+    height: 96px;
+    transform: rotate(-90deg);
+  }
+  .newsite-ring circle { fill: none; stroke-width: 7; }
+  .newsite-ring .ring-bg { stroke: #f3e8ff; }
+  .newsite-ring .ring-fg {
+    stroke: url(#nsGrad);
+    stroke-linecap: round;
+    stroke-dasharray: 276.46;
+    stroke-dashoffset: 0;
+    transition: stroke-dashoffset 1s linear;
+  }
+  .newsite-count {
+    position: absolute;
+    inset: 0;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 36px;
+    font-weight: 800;
+    color: #7c3aed;
+  }
+  .newsite-count.tick { animation: nsPop .35s ease; }
+  .newsite-btn {
     width: 100%;
-    padding: 14px 16px;
-    border: 2px solid #e9e5f5;
-    border-radius: 12px;
-    font-size: 16px;
-    font-family: inherit;
-    text-align: center;
-    letter-spacing: 1px;
-    outline: none;
-    transition: border-color .2s, box-shadow .2s;
-    margin-bottom: 8px;
-  }
-  .mobile-gate-input:focus {
-    border-color: #a855f7;
-    box-shadow: 0 0 0 4px rgba(168,85,247,0.15);
-  }
-  .mobile-gate-error {
-    font-size: 13px;
-    color: #ef4444;
-    font-weight: 600;
-    margin-bottom: 14px;
-    min-height: 20px;
-  }
-  .mobile-gate-btn {
-    width: 100%;
-    padding: 15px;
+    padding: 16px;
     border: none;
-    border-radius: 12px;
+    border-radius: 14px;
     background: linear-gradient(135deg, #a855f7, #ec4899);
     color: #fff;
     font-weight: 800;
     font-size: 15px;
+    letter-spacing: 0.3px;
     cursor: pointer;
-    box-shadow: 0 10px 24px -6px rgba(168,85,247,0.45);
-    transition: filter .2s, transform .15s;
+    box-shadow: 0 12px 26px -6px rgba(168,85,247,0.5);
+    transition: filter .2s, transform .15s, opacity .2s;
   }
-  .mobile-gate-btn:hover {
-    filter: brightness(1.06);
-    transform: translateY(-1px);
-  }
-  .mobile-gate-btn:disabled {
-    opacity: 0.7;
+  .newsite-btn:disabled {
+    background: #e5e7eb;
+    color: #9ca3af;
+    box-shadow: none;
     cursor: not-allowed;
   }
-  .mobile-gate-cancel-btn {
-    width: 100%;
-    padding: 13px;
-    margin-top: 10px;
-    border: 1.5px solid #e9e5f5;
-    border-radius: 12px;
-    background: #fff;
-    color: #6b7280;
-    font-weight: 700;
-    font-size: 14px;
-    cursor: pointer;
-    transition: background .2s, border-color .2s;
-  }
-  .mobile-gate-cancel-btn:hover {
-    background: #f4f0ff;
-    border-color: #c4b5fd;
-    color: #1e1b4b;
-  }
-  .mobile-gate-cancel-btn:disabled {
-    opacity: 0.7;
-    cursor: not-allowed;
+  .newsite-btn.ready { animation: nsGlow 1.6s infinite; }
+  .newsite-btn.ready:hover { filter: brightness(1.07); transform: translateY(-1px); }
+  @media (max-width: 560px) {
+    .newsite-box { padding: 34px 20px 24px; border-radius: 22px; }
+    .newsite-box h2 { font-size: 22px; }
   }
 
   /* ========== RESPONSIVE ========== */
@@ -2525,54 +2492,6 @@ $conn->close();
 </style>
 </head>
 <body>
-
-<?php if ($needsMobile): ?>
-<div class="mobile-gate-overlay" id="mobileGateOverlay">
-  <div class="mobile-gate-box">
-    <h2>📱 Mobile Number</h2>
-    <p>Dashboard එකට යන්න කලින් ඔබේ mobile number එක ඇතුළත් කරන්න.<br>
-    (10 digit number – 07XXXXXXXX)</p>
-    <form method="POST" action="" id="mobileGateForm">
-      <input type="tel" name="gate_mobile" id="gateMobileInput" class="mobile-gate-input"
-             placeholder="07XXXXXXXX" maxlength="10" inputmode="numeric" autocomplete="tel" required>
-      <div class="mobile-gate-error" id="gateMobileError"></div>
-      <button type="submit" class="mobile-gate-btn" id="gateMobileBtn">Continue to Dashboard →</button>
-      <button type="button" class="mobile-gate-cancel-btn" id="gateMobileCancelBtn">Cancel</button>
-    </form>
-  </div>
-</div>
-<script>
-  document.getElementById('mobileGateForm').addEventListener('submit', function(e) {
-    const input = document.getElementById('gateMobileInput');
-    const err = document.getElementById('gateMobileError');
-    const val = input.value.replace(/\D/g, '');
-    if (!/^0\d{9}$/.test(val)) {
-      e.preventDefault();
-      err.textContent = '⚠ 10 digit mobile number එකක් දෙන්න (0XXXXXXXXX)';
-      input.focus();
-      return false;
-    }
-    err.textContent = '';
-    document.getElementById('gateMobileBtn').disabled = true;
-    document.getElementById('gateMobileBtn').textContent = 'Please wait...';
-  });
-  document.getElementById('gateMobileInput').addEventListener('input', function() {
-    this.value = this.value.replace(/\D/g, '').slice(0, 10);
-  });
-  document.getElementById('gateMobileCancelBtn').addEventListener('click', function() {
-    const btn = this;
-    btn.disabled = true;
-    btn.textContent = 'Please wait...';
-    fetch(window.location.href, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: 'gate_skip=1'
-    })
-      .then(() => { window.location.reload(); })
-      .catch(() => { window.location.reload(); });
-  });
-</script>
-<?php else: ?>
 
 <header class="topbar">
   <button class="burger" id="burgerBtn" aria-label="Menu">
@@ -3084,13 +3003,89 @@ $conn->close();
   <span class="footer-copy">© <?php echo date('Y'); ?> Sipway Campus. All rights reserved.</span>
 </footer>
 
+<?php if ($showNewSitePopup): ?>
+<!-- ==================== NEW WEBSITE POPUP (10 -> 1 countdown) ==================== -->
+<div class="newsite-overlay" id="newSiteOverlay">
+  <div class="newsite-box" role="dialog" aria-modal="true" aria-labelledby="newSiteTitle">
+    <div class="newsite-rocket">🚀</div><br>
+    <span class="newsite-badge">New</span>
+    <h2 id="newSiteTitle">Our New Website</h2>
+    <p>
+      අපේ අලුත් website එක දැන් ready! 🎉<br>
+      We have launched our brand new website with a better look and more features.
+    </p>
+
+    <div class="newsite-count-wrap">
+      <svg class="newsite-ring" viewBox="0 0 96 96">
+        <defs>
+          <linearGradient id="nsGrad" x1="0" y1="0" x2="1" y2="1">
+            <stop offset="0%" stop-color="#a855f7"/>
+            <stop offset="100%" stop-color="#ec4899"/>
+          </linearGradient>
+        </defs>
+        <circle class="ring-bg" cx="48" cy="48" r="44"/>
+        <circle class="ring-fg" id="newSiteRing" cx="48" cy="48" r="44"/>
+      </svg>
+      <div class="newsite-count" id="newSiteCount">10</div>
+    </div>
+
+    <button type="button" class="newsite-btn" id="newSiteBtn" disabled>Please wait... 10</button>
+  </div>
+</div>
+<script>
+(function () {
+  var NEW_SITE_URL = <?php echo json_encode($newSiteUrl, JSON_UNESCAPED_SLASHES); ?>;
+  var TOTAL = 10;                       // countdown starts at 10 and goes down to 1
+  var left  = TOTAL;
+
+  var countEl = document.getElementById('newSiteCount');
+  var btn     = document.getElementById('newSiteBtn');
+  var ring    = document.getElementById('newSiteRing');
+  var CIRC    = 2 * Math.PI * 44;       // ring circumference
+
+  document.body.style.overflow = 'hidden';   // lock page scroll behind popup
+
+  function paint() {
+    countEl.textContent = left;
+    countEl.classList.remove('tick');
+    void countEl.offsetWidth;               // restart the pop animation
+    countEl.classList.add('tick');
+    ring.style.strokeDashoffset = CIRC * (1 - (left / TOTAL));
+    btn.textContent = 'Please wait... ' + left;
+  }
+  ring.style.strokeDasharray = CIRC;
+  paint();
+
+  var timer = setInterval(function () {
+    left--;
+    if (left >= 1) {
+      paint();
+      return;
+    }
+    // countdown finished (10 ... 1 done) -> enable the button
+    clearInterval(timer);
+    countEl.textContent = '✓';
+    ring.style.strokeDashoffset = CIRC;
+    btn.disabled = false;
+    btn.classList.add('ready');
+    btn.textContent = 'Visit New Website →';
+  }, 1000);
+
+  btn.addEventListener('click', function () {
+    if (btn.disabled) return;
+    window.location.href = NEW_SITE_URL;
+  });
+})();
+</script>
+<?php endif; ?>
+
 <script>
   const IS_LOGGED_IN = <?php echo $isLoggedIn ? 'true' : 'false'; ?>;
   const STUDENT_NAME = <?php echo $studentNameJs; ?>;
   const STUDENT_LANGUAGE = <?php echo $studentLanguageJs; ?>;
   const HAS_ACTIVE_PACKAGE = <?php echo json_encode($hasActivePackage); ?>;
   const ACTIVE_PACKAGE_SUBJECT = <?php echo $activePackageSubjectJs; ?>;
-  const ACTIVE_PACKAGE_TYPE = <?php echo isset($activePackageTypeJs) ? $activePackageTypeJs : 'null'; ?>; // 'individual' | 'group' | null
+  const ACTIVE_PACKAGE_TYPE = <?php echo json_encode($activePackageType); ?>; // 'individual' | 'group' | null
   const BOOKED_SESSIONS = <?php echo $bookedSessionsJs; ?>;
   const _nowLocal = new Date();
   const TODAY_STR = _nowLocal.getFullYear() + '-' +
@@ -3262,78 +3257,14 @@ $conn->close();
       en:'GB', zh:'CN', ja:'JP', fr:'FR', hi:'IN', ru:'RU', ar:'SA', ta:'IN', si:'LK', de:'DE', it:'IT'
     };
 
-function resolveFlagCode(lang) {
-  let code = (lang.flag || lang.flag_code || '').toString().trim().toUpperCase();
-  if (code && FLAG_SVGS[code]) return code;
-  const langCode = normalizeCode(lang.code);
-  if (LANG_TO_FLAG[langCode] && FLAG_SVGS[LANG_TO_FLAG[langCode]]) return LANG_TO_FLAG[langCode];
-  return 'DEFAULT';
-}
+    function resolveFlagCode(lang) {
+      let code = (lang.flag || lang.flag_code || '').toString().trim().toUpperCase();
+      if (code && FLAG_SVGS[code]) return code;
+      const langCode = normalizeCode(lang.code);
+      if (LANG_TO_FLAG[langCode] && FLAG_SVGS[LANG_TO_FLAG[langCode]]) return LANG_TO_FLAG[langCode];
+      return 'DEFAULT';
+    }
 
-function buildLangOption(lang, selectDefault) {
-  const flagCode  = resolveFlagCode(lang);
-  const codeNorm  = normalizeCode(lang.code);
-  const isEnabled = lang.is_enabled === true || lang.is_enabled === 1;
-
-  const li = document.createElement('li');
-  li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '') + (isEnabled ? ' enabled' : ' disabled');
-  li.setAttribute('role', 'option');
-  li.setAttribute('aria-selected', selectDefault ? 'true' : 'false');
-  li.setAttribute('aria-disabled', isEnabled ? 'false' : 'true');
-  li.dataset.value   = codeNorm;
-  li.dataset.flag    = flagCode;
-  li.dataset.label   = lang.label;
-  li.dataset.enabled = isEnabled ? '1' : '0';
-
-  li.innerHTML =
-    '<span class="gp-lang-option-left">' +
-      flagImgHtml(flagCode) +
-      '<span>' + lang.label + (isEnabled ? '' : ' (disabled)') + '</span>' +
-    '</span>' +
-    '<svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
-
-  if (isEnabled) {
-    li.addEventListener('click', () => {
-      selectLangOption(li);
-      closeLangDropdown();
-    });
-  }
-
-  return li;
-}
-
-function loadLanguages() {
-  fetch('get_languages.php')
-    .then(res => res.json())
-    .then(data => {
-      langOptions.innerHTML = '';
-
-      if (!data.success || !data.languages || data.languages.length === 0) {
-        langOptions.innerHTML = '<li class="gp-lang-option-loading">No languages found.</li>';
-        langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
-        regLanguage.value = 'en';
-        return;
-      }
-
-      const enabledList = data.languages.filter(l => l.is_enabled === true || l.is_enabled === 1);
-      const defaultLang = enabledList.find(l => normalizeCode(l.code) === 'en')
-                       || enabledList[0]
-                       || data.languages[0];
-
-      data.languages.forEach(lang => {
-        const isDefault = normalizeCode(lang.code) === normalizeCode(defaultLang.code);
-        langOptions.appendChild(buildLangOption(lang, isDefault));
-      });
-
-      langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) + '<span>' + defaultLang.label + '</span>';
-      regLanguage.value = normalizeCode(defaultLang.code);
-    })
-    .catch(() => {
-      langOptions.innerHTML = '<li class="gp-lang-option-loading">Could not load languages.</li>';
-      langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
-      regLanguage.value = 'en';
-    });
-}
     function flagImgHtml(code) {
       const key = (code || 'DEFAULT').toUpperCase().trim();
       const inner = FLAG_SVGS[key] || FLAG_SVGS.DEFAULT;
@@ -3345,7 +3276,7 @@ function loadLanguages() {
     document.addEventListener('click', (e) => { if (!langSelect.contains(e.target)) closeLangDropdown(); });
     document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeLangDropdown(); });
 
-      function selectLangOption(li){
+    function selectLangOption(li){
       langOptions.querySelectorAll('.gp-lang-option').forEach(o => {
         o.classList.remove('selected');
         o.setAttribute('aria-selected', 'false');
@@ -3356,34 +3287,40 @@ function loadLanguages() {
       regLanguage.value = normalizeCode(li.dataset.value);
     }
 
-    function buildLangOption(lang, selectDefault){
-      const flagCode = resolveFlagCode(lang);
-      const codeNorm = normalizeCode(lang.code);
+    // Language option (respects admin enable / disable)
+    function buildLangOption(lang, selectDefault) {
+      const flagCode  = resolveFlagCode(lang);
+      const codeNorm  = normalizeCode(lang.code);
+      const isEnabled = lang.is_enabled === true || lang.is_enabled === 1;
 
       const li = document.createElement('li');
-      li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '');
+      li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '') + (isEnabled ? ' enabled' : ' disabled');
       li.setAttribute('role', 'option');
       li.setAttribute('aria-selected', selectDefault ? 'true' : 'false');
-      li.dataset.value = codeNorm;
-      li.dataset.flag  = flagCode;
-      li.dataset.label = lang.label;
+      li.setAttribute('aria-disabled', isEnabled ? 'false' : 'true');
+      li.dataset.value   = codeNorm;
+      li.dataset.flag    = flagCode;
+      li.dataset.label   = lang.label;
+      li.dataset.enabled = isEnabled ? '1' : '0';
 
       li.innerHTML =
         '<span class="gp-lang-option-left">' +
           flagImgHtml(flagCode) +
-          '<span>' + lang.label + '</span>' +
+          '<span>' + lang.label + (isEnabled ? '' : ' (disabled)') + '</span>' +
         '</span>' +
         '<svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
 
-      li.addEventListener('click', () => {
-        selectLangOption(li);
-        closeLangDropdown();
-      });
+      if (isEnabled) {
+        li.addEventListener('click', () => {
+          selectLangOption(li);
+          closeLangDropdown();
+        });
+      }
 
       return li;
     }
 
-    function loadLanguages(){
+    function loadLanguages() {
       fetch('get_languages.php')
         .then(res => res.json())
         .then(data => {
@@ -3396,17 +3333,17 @@ function loadLanguages() {
             return;
           }
 
-          const defaultLang =
-            data.languages.find(l => normalizeCode(l.code) === 'en') ||
-            data.languages[0];
+          const enabledList = data.languages.filter(l => l.is_enabled === true || l.is_enabled === 1);
+          const defaultLang = enabledList.find(l => normalizeCode(l.code) === 'en')
+                           || enabledList[0]
+                           || data.languages[0];
 
           data.languages.forEach(lang => {
             const isDefault = normalizeCode(lang.code) === normalizeCode(defaultLang.code);
             langOptions.appendChild(buildLangOption(lang, isDefault));
           });
 
-          langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) +
-                                  '<span>' + defaultLang.label + '</span>';
+          langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) + '<span>' + defaultLang.label + '</span>';
           regLanguage.value = normalizeCode(defaultLang.code);
         })
         .catch(() => {
@@ -4274,4 +4211,3 @@ function loadLanguages() {
 
 </body>
 </html>
-<?php endif; ?>
