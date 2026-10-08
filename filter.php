@@ -687,10 +687,8 @@
   }
 
   const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
-  if (!adminSession || !adminSession.username) {
-    window.location.href = 'admin-login.html';
-    return;
-  }
+ 
+  
   document.getElementById('adminName').textContent = adminSession.username;
   document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-GB', {

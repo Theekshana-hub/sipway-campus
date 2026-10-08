@@ -6,7 +6,6 @@ if (!isset($conn) || $conn === null) {
     die('Database connection failed.');
 }
 
-
 $conn->query("
 CREATE TABLE IF NOT EXISTS register_guide_video (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -134,7 +133,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $stmt->close();
         }
     } else {
-        // File upload
+        // ===== FILE UPLOAD =====
         if (!isset($_FILES['video']) || $_FILES['video']['error'] !== UPLOAD_ERR_OK) {
             $message = isset($_FILES['video']) ? uploadErrorMessage((int)$_FILES['video']['error']) : 'No video selected.';
             $messageType = 'error';
@@ -414,19 +413,16 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   .toast.error-toast{ background:var(--danger); }
 
   /* =====================================================================
-     PROTECTED PLAYER  (CSS)  — copy this block to the student dashboard too
+     PROTECTED PLAYER  (CSS)
      ===================================================================== */
   .sp-player{
     position:relative; width:100%; aspect-ratio:16/9; margin-top:12px;
     background:#000; border-radius:10px; overflow:hidden;
     user-select:none; -webkit-user-select:none;
   }
-  /* iframe is taller than the video, extra area is cropped -> hides YouTube title bar / logo */
   .sp-frame{ position:absolute; left:0; right:0; top:-15%; bottom:-15%; }
   .sp-frame iframe{ width:100%; height:100%; border:0; display:block; }
-  /* invisible shield: blocks every click / hover reaching YouTube */
   .sp-shield{ position:absolute; inset:0; z-index:3; cursor:pointer; }
-  /* cover hides YouTube's paused / end-screen overlays */
   .sp-cover{
     position:absolute; inset:0; z-index:2; background:#000 center/cover no-repeat;
     opacity:0; pointer-events:none; transition:opacity .2s ease;
@@ -667,7 +663,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
         ?>
 
         <?php if ($playerType === 'youtube' && $playerId): ?>
-          <!-- PROTECTED YOUTUBE PLAYER (HTML) — copy to the student dashboard -->
           <div class="sp-player" data-yt-id="<?php echo htmlspecialchars($playerId); ?>">
             <div class="sp-frame"><div class="sp-yt"></div></div>
             <div class="sp-cover" style="<?php echo $poster ? "background-image:url('" . htmlspecialchars($poster, ENT_QUOTES) . "')" : ''; ?>">
@@ -717,25 +712,25 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       <h3><?php echo $current ? 'Replace Video' : 'Add Register Guide Video'; ?></h3>
 
       <div class="source-toggle" id="sourceToggle">
-        <div class="source-toggle-btn active" data-source="link">🔗 Paste Link</div>
-        <div class="source-toggle-btn" data-source="upload">⬆ Upload File</div>
+        <div class="source-toggle-btn active" data-source="upload">⬆ Upload File</div>
+        <div class="source-toggle-btn" data-source="link">🔗 Paste Link</div>
       </div>
 
       <form method="POST" enctype="multipart/form-data" id="videoForm">
         <input type="hidden" name="action" value="save">
-        <input type="hidden" name="source" id="sourceInput" value="link">
+        <input type="hidden" name="source" id="sourceInput" value="upload">
 
         <label>Title</label>
         <input type="text" name="title" value="How to Register" placeholder="How to Register">
 
-        <div class="source-panel active" id="panelLink">
-          <label>Video Link (YouTube / Vimeo / direct .mp4) *</label>
-          <input type="url" name="video_url" id="videoUrlInput" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
+        <div class="source-panel active" id="panelUpload">
+          <label>Video file (MP4 / WebM / MOV / MKV) *</label>
+          <input type="file" name="video" id="videoFileInput" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.mkv" required>
         </div>
 
-        <div class="source-panel" id="panelUpload">
-          <label>Video file (MP4 / WebM) *</label>
-          <input type="file" name="video" id="videoFileInput" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov">
+        <div class="source-panel" id="panelLink">
+          <label>Video Link (YouTube / Vimeo / direct .mp4) *</label>
+          <input type="url" name="video_url" id="videoUrlInput" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
         </div>
 
         <label>Thumbnail (optional)</label>
@@ -751,9 +746,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
 
 <script>
 /* =====================================================================
-   PROTECTED YOUTUBE PLAYER (JS) — copy this block to the student dashboard too
-   Uses the YouTube IFrame API with all native controls turned off and
-   an invisible shield on top, so students can't click through to YouTube.
+   PROTECTED YOUTUBE PLAYER (JS)
    ===================================================================== */
 (function(){
   const players = document.querySelectorAll('.sp-player[data-yt-id]');
@@ -789,12 +782,12 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
       playerVars: {
-        controls: 0,        // hide native controls
-        rel: 0,             // no related videos from other channels
-        modestbranding: 1,  // minimal YouTube branding
-        disablekb: 1,       // no keyboard shortcuts
-        fs: 0,              // no native fullscreen button
-        iv_load_policy: 3,  // hide annotations
+        controls: 0,
+        rel: 0,
+        modestbranding: 1,
+        disablekb: 1,
+        fs: 0,
+        iv_load_policy: 3,
         playsinline: 1,
         cc_load_policy: 0,
         origin: location.origin
@@ -809,7 +802,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
           el.classList.toggle('is-playing', playing);
           icoPlay.setAttribute('d', playing ? PAUSE_D : PLAY_D);
           if (e.data === S.ENDED) {
-            // go back to start & pause so YouTube's end-screen suggestions never show
             yt.seekTo(0, true);
             yt.pauseVideo();
           }
@@ -875,12 +867,11 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   const BADGE_POLL_INTERVAL_MS = 15000;
 
   const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
-  if (!adminSession || !adminSession.username) {
-    window.location.href = 'admin-login.html';
-    return;
+
+  if (adminSession && adminSession.username) {
+    document.getElementById('adminName').textContent = adminSession.username;
+    document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
   }
-  document.getElementById('adminName').textContent = adminSession.username;
-  document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-GB', {
     weekday:'long', year:'numeric', month:'long', day:'numeric'
   });
@@ -968,6 +959,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   setInterval(updateAvailabilityBadge, BADGE_POLL_INTERVAL_MS);
   setInterval(updateSupportBadge, BADGE_POLL_INTERVAL_MS);
 
+  // ===== Source Toggle (Upload / Link) =====
   const sourceToggle = document.getElementById('sourceToggle');
   const sourceInput  = document.getElementById('sourceInput');
   const panelLink    = document.getElementById('panelLink');
@@ -981,20 +973,23 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       btn.classList.add('active');
       const src = btn.dataset.source;
       sourceInput.value = src;
-      if (src === 'link') {
-        panelLink.classList.add('active');
-        panelUpload.classList.remove('active');
-        videoUrlInput.setAttribute('required', 'required');
-        videoFileInput.removeAttribute('required');
-      } else {
+
+      if (src === 'upload') {
         panelUpload.classList.add('active');
         panelLink.classList.remove('active');
         videoFileInput.setAttribute('required', 'required');
         videoUrlInput.removeAttribute('required');
+      } else {
+        panelLink.classList.add('active');
+        panelUpload.classList.remove('active');
+        videoUrlInput.setAttribute('required', 'required');
+        videoFileInput.removeAttribute('required');
       }
     });
   });
-  videoUrlInput.setAttribute('required', 'required');
+
+  // Default = Upload (already set in HTML)
+  videoFileInput.setAttribute('required', 'required');
 
   document.getElementById('menuToggle')?.addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('open');
