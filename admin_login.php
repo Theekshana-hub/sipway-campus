@@ -1,49 +1,36 @@
 <?php
+// Output buffering: stray warnings / whitespace JSON response ekata kalaba wenna denne na
+ob_start();
 session_start();
-require_once 'db.php';
 
 /* ==========================================================
    ADMIN LOGIN — SERVER-SIDE SESSION CHECK
-   -----------------------------------------------------------
-   Credentials mekath dan hard-code karala thiyenne (kalin JS
-   ekema thibba widihatama). Ithin ekath danata wenas welak nathi
-   witharai — dan check eka PHP eken, server side, sidu wenawa.
-   Egyanma $_SESSION['admin_id'] eka real widihata set wenawa,
-   ithin chat_api.php ekatath, admin_chat.php ekatath egollo
-   dennama SAME session eka penenawa.
-
-   Production ekakata giyoth: admin username/password DB table
-   ekaka thiyala, password_hash()/password_verify() use karala
-   check karanna. Dan therenna witharak simple widihata thiyenne.
+   db.php require eka ain kala (login ekata DB oni na, eka
+   fail unoth JSON break wenawa). Production walata password
+   DB ekaka password_hash()/password_verify() use karanna.
    ============================================================ */
 const ADMIN_USERNAME = "admin";
 const ADMIN_PASSWORD = "Admin@123";
 const ADMIN_ID       = 1;      // must match the '1' hardcoded as admin id in chat_api.php
 const ADMIN_NAME     = "Admin";
 
-// If already logged in, skip straight to dashboard
-if (isset($_SESSION['admin_id'])) {
-    header('Location: admin-dashboard.html');
-    exit;
-}
-
-// Handle the login POST (AJAX) request
+// 1) POST (AJAX login) — session check ekata KALIN handle karanawa
 if ($_SERVER['REQUEST_METHOD'] === 'POST') {
-    header('Content-Type: application/json');
+    ob_clean();                // extra output thibboth ain karanawa
+    header('Content-Type: application/json; charset=UTF-8');
 
-    $input = json_decode(file_get_contents('php://input'), true) ?: [];
-    $username = trim($input['username'] ?? '');
-    $password = $input['password'] ?? '';
+    $input    = json_decode(file_get_contents('php://input'), true) ?: [];
+    $username = trim((string)($input['username'] ?? ''));
+    $password = (string)($input['password'] ?? '');
 
-    if ($username === ADMIN_USERNAME && $password === ADMIN_PASSWORD) {
-        // Regenerate session id on login to avoid session fixation
+    if (hash_equals(ADMIN_USERNAME, $username) && hash_equals(ADMIN_PASSWORD, $password)) {
         session_regenerate_id(true);
 
         $_SESSION['admin_id']        = ADMIN_ID;
         $_SESSION['admin_name']      = ADMIN_NAME;
         $_SESSION['admin_logged_in'] = true;
 
-        // Make sure this browser isn't also carrying a stale student session
+        // stale student session thiyenawanam ain karanawa
         unset($_SESSION['student_id'], $_SESSION['student_name']);
 
         echo json_encode(['success' => true, 'redirect' => 'admin-dashboard.html']);
@@ -52,6 +39,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
     exit;
 }
+
+// 2) GET: already logged in nam dashboard ekata
+if (isset($_SESSION['admin_id'])) {
+    ob_end_clean();
+    header('Location: admin-dashboard.html');
+    exit;
+}
+
+ob_end_flush();
 ?>
 <!DOCTYPE html>
 <html lang="si">
@@ -131,13 +127,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     color:#fff; font-size:13px; font-weight:800;
     flex-shrink:0;
   }
-  .topbar .help-link{
-    font-size:13px;
-    color:var(--muted);
-    text-decoration:none;
-    font-weight:600;
-  }
-  .topbar .help-link:hover{ color:var(--navy); }
 
   .wrap{
     min-height:calc(100vh - 60px);
@@ -402,19 +391,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
   .btn-primary.loading .btn-text{ opacity:0.85; }
   @keyframes spin{ to{ transform:rotate(360deg); } }
 
-  .switch-row{
-    text-align:center;
-    margin-top:26px;
-    font-size:13.5px;
-    color:var(--muted);
-  }
-  .switch-row a{
-    color:var(--navy-2);
-    font-weight:800;
-    text-decoration:none;
-  }
-  .switch-row a:hover{ text-decoration:underline; }
-
   a:focus-visible, button:focus-visible, input:focus-visible{
     outline:2.5px solid var(--navy-2);
     outline-offset:2px;
@@ -474,8 +450,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 <body>
 
 <div class="topbar">
-  <span class="logo"><span class="logo-mark">SC</span>Sipway English Accademy</span>
-
+  <span class="logo"><span class="logo-mark">SC</span>Sipway English Academy</span>
 </div>
 
 <div class="wrap">
@@ -552,8 +527,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
           <span class="btn-text">ADMIN LOGIN</span>
         </button>
       </form>
-
-
     </div>
   </div>
 </div>
@@ -587,21 +560,28 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     });
   });
 
-  /* ==========================================================
-     ADMIN LOGIN — now goes through the server (PHP session)
-     instead of only localStorage, so chat_api.php / admin_chat.php
-     can actually see who is logged in.
-     ============================================================ */
+  /* ADMIN LOGIN — server (PHP session) eken */
   const adminUser = document.getElementById('adminUser');
   const adminPass = document.getElementById('adminPass');
   const adminForm = document.getElementById('adminForm');
-  const adminBtn = document.getElementById('adminBtn');
+  const adminBtn  = document.getElementById('adminBtn');
+  const userErr   = document.getElementById('adminUserErr');
+  const passErr   = document.getElementById('adminPassErr');
+  const DEFAULT_PASS_ERR = '⚠ Incorrect admin credentials.';
+
+  function resetBtn(){
+    adminBtn.classList.remove('loading');
+    adminBtn.disabled = false;
+  }
 
   adminUser.addEventListener('input', () => {
-    if(adminUser.value.length) setFieldState(adminUser, document.getElementById('adminUserErr'), adminUser.value.trim().length > 0);
+    if(adminUser.value.length) setFieldState(adminUser, userErr, adminUser.value.trim().length > 0);
   });
   adminPass.addEventListener('input', () => {
-    if(adminPass.value.length) setFieldState(adminPass, document.getElementById('adminPassErr'), adminPass.value.length > 0);
+    if(adminPass.value.length){
+      passErr.textContent = DEFAULT_PASS_ERR;
+      setFieldState(adminPass, passErr, true);
+    }
   });
 
   adminForm.addEventListener('submit', async function(e){
@@ -609,11 +589,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     let ok = true;
 
     const userOk = adminUser.value.trim().length > 0;
-    setFieldState(adminUser, document.getElementById('adminUserErr'), userOk);
+    setFieldState(adminUser, userErr, userOk);
     if(!userOk) ok = false;
 
     const passOk = adminPass.value.length > 0;
-    setFieldState(adminPass, document.getElementById('adminPassErr'), passOk);
+    if(!passOk) passErr.textContent = '⚠ Please enter the admin password.';
+    setFieldState(adminPass, passErr, passOk);
     if(!passOk) ok = false;
 
     if(!ok) return;
@@ -624,13 +605,26 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     try {
       const res = await fetch('admin_login.php', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        credentials: 'same-origin',
+        headers: {
+          'Content-Type': 'application/json',
+          'Accept': 'application/json'
+        },
         body: JSON.stringify({
           username: adminUser.value.trim(),
           password: adminPass.value
         })
       });
-      const data = await res.json();
+
+      // JSON nemei response ekak awoth console eke penawa
+      const raw = await res.text();
+      let data;
+      try {
+        data = JSON.parse(raw);
+      } catch (parseErr) {
+        console.error('Server returned non-JSON (status ' + res.status + '):', raw);
+        throw parseErr;
+      }
 
       if (data.success) {
         showToast('Admin login successful! Redirecting...');
@@ -638,17 +632,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         [adminUser, adminPass].forEach(i => i.classList.remove('valid','invalid'));
         setTimeout(() => { window.location.href = data.redirect || 'admin-dashboard.html'; }, 500);
       } else {
-        document.getElementById('adminPassErr').textContent = '⚠ ' + (data.message || 'Incorrect admin username or password.');
-        setFieldState(adminUser, document.getElementById('adminUserErr'), false);
-        setFieldState(adminPass, document.getElementById('adminPassErr'), false);
+        passErr.textContent = '⚠ ' + (data.message || 'Incorrect admin username or password.');
+        setFieldState(adminUser, userErr, false);
+        setFieldState(adminPass, passErr, false);
         showToast(data.message || 'Incorrect admin username or password.', true);
-        adminBtn.classList.remove('loading');
-        adminBtn.disabled = false;
+        resetBtn();
       }
     } catch (err) {
+      console.error('Admin login error:', err);
       showToast('Server error. Please try again.', true);
-      adminBtn.classList.remove('loading');
-      adminBtn.disabled = false;
+      resetBtn();
     }
   });
 })();

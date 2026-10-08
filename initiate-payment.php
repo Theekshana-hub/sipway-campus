@@ -7,6 +7,7 @@ define('SIPWAY_APP', true);
 if (session_status() === PHP_SESSION_NONE) {
     session_start();
 }
+
 require_once 'db.php';
 require_once 'payment-config.php';
 require_once 'dfcc-api.php';
@@ -54,6 +55,7 @@ if ($packageType === 'regular') {
     $chk->execute();
     $existing = $chk->get_result()->fetch_assoc();
     $chk->close();
+
     if ($existing) {
         header('Location: packages.php?error=already_active');
         exit;
@@ -66,21 +68,21 @@ $amount   = (float) $package['price'];
 $cents    = dfcc_amount_to_cents($amount);
 $currency = DFCC_CURRENCY;
 
-// Log attempt
+// Log attempt - FIXED: added created_at
 $ins = $conn->prepare("
     INSERT INTO payment_transactions 
-        (order_id, student_id, package_id, package_type, amount, currency, status) 
-    VALUES (?, ?, ?, ?, ?, ?, 'initiated')
+        (order_id, student_id, package_id, package_type, amount, currency, status, created_at) 
+    VALUES (?, ?, ?, ?, ?, ?, 'initiated', NOW())
 ");
 $ins->bind_param('siisss', $orderId, $studentId, $packageId, $packageType, $amount, $currency);
 $ins->execute();
 $ins->close();
 
-// Also insert into payments table (your existing structure)
+// Also insert into payments table - FIXED: added created_at
 $ins2 = $conn->prepare("
     INSERT INTO payments 
-        (student_id, package_id, order_id, amount, currency, status) 
-    VALUES (?, ?, ?, ?, ?, 'pending')
+        (student_id, package_id, order_id, amount, currency, status, created_at) 
+    VALUES (?, ?, ?, ?, ?, 'pending', NOW())
 ");
 $ins2->bind_param('iisds', $studentId, $packageId, $orderId, $amount, $currency);
 $ins2->execute();
@@ -117,7 +119,7 @@ $result = dfcc_api_call('PAYMENT_INIT', $requestData);
 
 if (!$result['ok'] || empty($result['body']['responseData']['paymentPageUrl']) || empty($result['body']['responseData']['reqid'])) {
     error_log('[DFCC] PAYMENT_INIT failed for order ' . $orderId . ': ' . ($result['error'] ?? $result['raw']));
-    
+
     $fail = $conn->prepare("UPDATE payment_transactions SET status = 'init_failed' WHERE order_id = ?");
     $fail->bind_param('s', $orderId);
     $fail->execute();
