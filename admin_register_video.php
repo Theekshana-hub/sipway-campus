@@ -1,11 +1,15 @@
 <?php
 session_start();
-
+// Try to raise upload limits (works only if hosting allows it)
+@ini_set('upload_max_filesize', '100M');
+@ini_set('post_max_size', '110M');
+@ini_set('max_execution_time', '300');
+@ini_set('max_input_time', '300');
+@ini_set('memory_limit', '256M');
 require_once 'db.php';
 if (!isset($conn) || $conn === null) {
     die('Database connection failed.');
 }
-
 $conn->query("
 CREATE TABLE IF NOT EXISTS register_guide_video (
   id INT AUTO_INCREMENT PRIMARY KEY,
@@ -19,10 +23,8 @@ CREATE TABLE IF NOT EXISTS register_guide_video (
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4
 ");
-
 $uploadDir = __DIR__ . '/uploads/register_guide/';
 $thumbDir  = __DIR__ . '/uploads/register_guide_thumbs/';
-
 if (!is_dir($uploadDir)) {
     if (!is_dir(__DIR__ . '/uploads')) @mkdir(__DIR__ . '/uploads', 0755, true);
     @mkdir($uploadDir, 0755, true);
@@ -30,10 +32,8 @@ if (!is_dir($uploadDir)) {
 if (!is_dir($thumbDir)) {
     @mkdir($thumbDir, 0755, true);
 }
-
 $message     = '';
 $messageType = '';
-
 function uploadErrorMessage($code) {
     $map = [
         UPLOAD_ERR_INI_SIZE   => 'File too large (php.ini upload_max_filesize).',
@@ -46,11 +46,9 @@ function uploadErrorMessage($code) {
     ];
     return $map[$code] ?? ('Unknown upload error: ' . $code);
 }
-
 function parseVideoUrl($url) {
     $url = trim($url);
     if ($url === '' || !filter_var($url, FILTER_VALIDATE_URL)) return null;
-
     if (preg_match('~(?:youtube\.com/(?:watch\?(?:[^#]*&)?v=|embed/|shorts/|live/)|youtu\.be/)([A-Za-z0-9_-]{6,})~i', $url, $m)) {
         $id = $m[1];
         return [
@@ -95,10 +93,11 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
     // Clear table (only one row needed)
     $conn->query("DELETE FROM register_guide_video");
 
+    $isAjax = !empty($_SERVER['HTTP_X_REQUESTED_WITH']) && strtolower($_SERVER['HTTP_X_REQUESTED_WITH']) === 'xmlhttprequest';
+
     if ($source === 'link') {
         $rawUrl = trim($_POST['video_url'] ?? '');
         $parsed = parseVideoUrl($rawUrl);
-
         if ($parsed === null) {
             $message = 'Please paste a valid video link (YouTube, Vimeo, or direct .mp4).';
             $messageType = 'error';
@@ -106,7 +105,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $videoPath = null;
             $videoUrl  = $rawUrl;
             $thumbPath = $parsed['thumb_url'];
-
             if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
                 $tExt = strtolower(pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION));
                 if (in_array($tExt, ['jpg','jpeg','png','webp'], true) && is_writable($thumbDir)) {
@@ -116,7 +114,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                     }
                 }
             }
-
             $stmt = $conn->prepare("
                 INSERT INTO register_guide_video
                 (source_type, video_path, video_url, thumbnail_path, title, status)
@@ -141,7 +138,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             $file    = $_FILES['video'];
             $ext     = strtolower(pathinfo($file['name'], PATHINFO_EXTENSION));
             $allowed = ['mp4', 'webm', 'mov', 'mkv'];
-
             if (!in_array($ext, $allowed, true)) {
                 $message = 'Only MP4, WebM, MOV, MKV allowed.';
                 $messageType = 'error';
@@ -151,14 +147,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
             } else {
                 $safeName = 'reg_' . time() . '_' . bin2hex(random_bytes(4)) . '.' . $ext;
                 $dest     = $uploadDir . $safeName;
-
                 if (!move_uploaded_file($file['tmp_name'], $dest)) {
                     $message = 'Failed to move uploaded file.';
                     $messageType = 'error';
                 } else {
                     $videoPath = 'uploads/register_guide/' . $safeName;
                     $thumbPath = null;
-
                     if (isset($_FILES['thumbnail']) && $_FILES['thumbnail']['error'] === UPLOAD_ERR_OK) {
                         $tExt = strtolower(pathinfo($_FILES['thumbnail']['name'], PATHINFO_EXTENSION));
                         if (in_array($tExt, ['jpg','jpeg','png','webp'], true) && is_writable($thumbDir)) {
@@ -168,7 +162,6 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                             }
                         }
                     }
-
                     $stmt = $conn->prepare("
                         INSERT INTO register_guide_video
                         (source_type, video_path, video_url, thumbnail_path, title, status)
@@ -187,6 +180,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action']) && $_POST['
                 }
             }
         }
+    }
+
+    // If this is an AJAX request → return JSON
+    if ($isAjax) {
+        header('Content-Type: application/json');
+        echo json_encode([
+            'success' => $messageType === 'success',
+            'message' => $message,
+            'type'    => $messageType
+        ]);
+        exit;
     }
 }
 
@@ -212,9 +216,7 @@ $res = $conn->query("SELECT * FROM register_guide_video WHERE status = 'active' 
 if ($res && $row = $res->fetch_assoc()) {
     $current = $row;
 }
-
-$phpUploadMax = ini_get('upload_max_filesize');
-$dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
+$dirWritable = is_dir($uploadDir) && is_writable($uploadDir);
 ?>
 <!DOCTYPE html>
 <html lang="si">
@@ -392,6 +394,7 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   }
   .btn-primary{ background:linear-gradient(135deg, var(--coral), var(--coral-dark)); color:#fff; }
   .btn-danger{ background:var(--danger-soft); color:var(--danger); }
+  .btn:disabled{ opacity:0.6; cursor:not-allowed; }
   .current-box{
     background:var(--navy-soft); border-radius:12px; padding:16px; margin-bottom:20px;
   }
@@ -411,6 +414,36 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.error-toast{ background:var(--danger); }
+
+  /* ===== Progress Bar ===== */
+  .upload-progress-wrap{
+    display:none;
+    margin:16px 0 6px;
+    background:#f0f4f8;
+    border-radius:12px;
+    padding:14px 16px;
+    border:1px solid var(--line-soft);
+  }
+  .upload-progress-wrap.active{ display:block; }
+  .upload-progress-header{
+    display:flex; justify-content:space-between; align-items:center;
+    margin-bottom:8px; font-size:13px; font-weight:700; color:var(--navy);
+  }
+  .upload-progress-percent{
+    font-size:14px; font-weight:800; color:var(--coral);
+  }
+  .upload-progress-bar{
+    height:10px; background:#e2e8f0; border-radius:20px; overflow:hidden;
+  }
+  .upload-progress-fill{
+    height:100%; width:0%;
+    background:linear-gradient(90deg, var(--coral), var(--coral-dark));
+    border-radius:20px;
+    transition:width 0.15s linear;
+  }
+  .upload-progress-status{
+    margin-top:8px; font-size:12.5px; color:var(--muted); font-weight:500;
+  }
 
   /* =====================================================================
      PROTECTED PLAYER  (CSS)
@@ -453,7 +486,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   .sp-player video{ width:100%; height:100%; display:block; background:#000; }
   .sp-plain{ position:relative; width:100%; aspect-ratio:16/9; margin-top:12px; border-radius:10px; overflow:hidden; background:#000; }
   .sp-plain iframe, .sp-plain video{ width:100%; height:100%; border:0; display:block; }
-
   @media (max-width:880px){
     :root{ --sidebar-w:230px; }
     .sidebar{ transform:translateX(-100%); }
@@ -529,7 +561,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       </svg>
       Vocabulary Videos
     </a>
-
 <a class="nav-item" href="admin_activated_vocabulary_packages.php">
   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
     <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
@@ -599,7 +630,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     </button>
   </div>
 </aside>
-
 <div class="main">
   <div class="topbar">
     <div style="display:flex; align-items:center; gap:14px;">
@@ -621,24 +651,21 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       </div>
     </div>
   </div>
-
   <div class="content">
     <div class="greeting">
       <h1>How to Register – Video 🎬</h1>
       <p>Student dashboard එකේ “How to Register” button එකෙන් පේන video එක මෙතනින් upload / update කරන්න. එක විතරක් තියෙනවා (new one upload කළාම old එක replace වෙනවා).</p>
     </div>
-
     <?php if ($message): ?>
       <div class="alert <?php echo htmlspecialchars($messageType); ?>">
         <?php echo htmlspecialchars($message); ?>
       </div>
     <?php endif; ?>
-
     <div class="debug-box">
-      upload_max_filesize = <?php echo htmlspecialchars($phpUploadMax); ?> |
+      upload_max_filesize = <strong>100M</strong> |
+      post_max_size = <strong>110M</strong> |
       folder writable = <?php echo $dirWritable ? 'YES ✅' : 'NO ❌'; ?>
     </div>
-
     <?php if ($current): ?>
       <div class="current-box">
         <h4>Current Active Video</h4>
@@ -661,7 +688,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
           }
           $poster = $current['thumbnail_path'] ?? '';
         ?>
-
         <?php if ($playerType === 'youtube' && $playerId): ?>
           <div class="sp-player" data-yt-id="<?php echo htmlspecialchars($playerId); ?>">
             <div class="sp-frame"><div class="sp-yt"></div></div>
@@ -683,19 +709,16 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
               </button>
             </div>
           </div>
-
         <?php elseif ($playerType === 'vimeo'): ?>
           <div class="sp-plain">
             <iframe src="<?php echo htmlspecialchars($playerSrc); ?>" allow="autoplay; fullscreen" allowfullscreen></iframe>
           </div>
-
         <?php elseif ($playerSrc): ?>
           <div class="sp-plain">
             <video controls playsinline controlsList="nodownload noremoteplayback" disablePictureInPicture
                    oncontextmenu="return false;" src="<?php echo htmlspecialchars($playerSrc); ?>"></video>
           </div>
         <?php endif; ?>
-
         <form method="POST" style="margin-top:14px;" onsubmit="return confirm('Delete this register guide video?');">
           <input type="hidden" name="action" value="delete">
           <button type="submit" class="btn btn-danger">🗑 Delete Current Video</button>
@@ -707,43 +730,46 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
         <p>Upload or paste a link below. It will appear on the student dashboard “How to Register” button.</p>
       </div>
     <?php endif; ?>
-
     <div class="panel">
       <h3><?php echo $current ? 'Replace Video' : 'Add Register Guide Video'; ?></h3>
-
       <div class="source-toggle" id="sourceToggle">
         <div class="source-toggle-btn active" data-source="upload">⬆ Upload File</div>
         <div class="source-toggle-btn" data-source="link">🔗 Paste Link</div>
       </div>
-
       <form method="POST" enctype="multipart/form-data" id="videoForm">
         <input type="hidden" name="action" value="save">
         <input type="hidden" name="source" id="sourceInput" value="upload">
-
         <label>Title</label>
         <input type="text" name="title" value="How to Register" placeholder="How to Register">
-
         <div class="source-panel active" id="panelUpload">
           <label>Video file (MP4 / WebM / MOV / MKV) *</label>
           <input type="file" name="video" id="videoFileInput" accept="video/mp4,video/webm,video/quicktime,.mp4,.webm,.mov,.mkv" required>
         </div>
-
         <div class="source-panel" id="panelLink">
           <label>Video Link (YouTube / Vimeo / direct .mp4) *</label>
           <input type="url" name="video_url" id="videoUrlInput" placeholder="https://www.youtube.com/watch?v=XXXXXXXXXXX">
         </div>
-
         <label>Thumbnail (optional)</label>
         <input type="file" name="thumbnail" accept="image/*">
 
-        <button type="submit" class="btn btn-primary">Save Register Guide Video</button>
+        <!-- Progress Bar -->
+        <div class="upload-progress-wrap" id="uploadProgress">
+          <div class="upload-progress-header">
+            <span>Uploading video...</span>
+            <span class="upload-progress-percent" id="progressPercent">0%</span>
+          </div>
+          <div class="upload-progress-bar">
+            <div class="upload-progress-fill" id="progressFill"></div>
+          </div>
+          <div class="upload-progress-status" id="progressStatus">Please wait...</div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="submitBtn">Save Register Guide Video</button>
       </form>
     </div>
   </div>
 </div>
-
 <div class="toast" id="toast"></div>
-
 <script>
 /* =====================================================================
    PROTECTED YOUTUBE PLAYER (JS)
@@ -751,16 +777,13 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
 (function(){
   const players = document.querySelectorAll('.sp-player[data-yt-id]');
   if (!players.length) return;
-
   const tag = document.createElement('script');
   tag.src = 'https://www.youtube.com/iframe_api';
   document.head.appendChild(tag);
-
   function fmt(s){
     s = Math.max(0, Math.floor(s || 0));
     return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
   }
-
   function setup(el){
     const id       = el.dataset.ytId;
     const shield   = el.querySelector('.sp-shield');
@@ -772,12 +795,10 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
     const icoPlay  = el.querySelector('.sp-ico-play');
     const icoVol   = el.querySelector('.sp-ico-vol');
     let seeking = false, timer = null;
-
     const PLAY_D  = 'M8 5v14l11-7z';
     const PAUSE_D = 'M6 5h4v14H6zm8 0h4v14h-4z';
     const VOL_D   = 'M3 9v6h4l5 5V4L7 9H3zm13.5 3A4.5 4.5 0 0 0 14 8v8a4.5 4.5 0 0 0 2.5-4z';
     const MUTE_D  = 'M16.5 12A4.5 4.5 0 0 0 14 8v2.2l2.5 2.5V12zM19 12a7 7 0 0 1-.9 3.4l1.5 1.5A9 9 0 0 0 21 12a9 9 0 0 0-7-8.8v2.1A7 7 0 0 1 19 12zM4.3 3L3 4.3 7.7 9H3v6h4l5 5v-6.7l4.2 4.2c-.7.5-1.4.9-2.2 1.1v2.1a9 9 0 0 0 3.6-1.8l2.1 2.1 1.3-1.3L4.3 3zM12 4L9.9 6.1 12 8.2V4z';
-
     const yt = new YT.Player(el.querySelector('.sp-yt'), {
       host: 'https://www.youtube-nocookie.com',
       videoId: id,
@@ -813,24 +834,20 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
         }
       }
     });
-
     function tick(){
       if (!yt.getDuration) return;
       const d = yt.getDuration() || 0, c = yt.getCurrentTime() || 0;
       if (!seeking && d) seek.value = Math.round((c / d) * 1000);
       timeEl.textContent = fmt(c) + ' / ' + fmt(d);
     }
-
     function toggle(){
       const s = yt.getPlayerState();
       if (s === YT.PlayerState.PLAYING || s === YT.PlayerState.BUFFERING) yt.pauseVideo();
       else yt.playVideo();
     }
-
     shield.addEventListener('click', toggle);
     btnPlay.addEventListener('click', toggle);
     el.addEventListener('contextmenu', function(e){ e.preventDefault(); });
-
     seek.addEventListener('input', function(){
       seeking = true;
       const d = yt.getDuration() || 0;
@@ -841,12 +858,10 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       yt.seekTo((seek.value / 1000) * d, true);
       seeking = false;
     });
-
     btnMute.addEventListener('click', function(){
       if (yt.isMuted()) { yt.unMute(); icoVol.setAttribute('d', VOL_D); }
       else { yt.mute(); icoVol.setAttribute('d', MUTE_D); }
     });
-
     btnFs.addEventListener('click', function(){
       const fsEl = document.fullscreenElement || document.webkitFullscreenElement;
       if (fsEl) {
@@ -856,18 +871,15 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       }
     });
   }
-
   window.onYouTubeIframeAPIReady = function(){
     players.forEach(setup);
   };
 })();
 
-/* ===================== Admin page logic ===================== */
+/* ===================== Admin page logic + Progress Upload ===================== */
 (function(){
   const BADGE_POLL_INTERVAL_MS = 15000;
-
   const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
-
   if (adminSession && adminSession.username) {
     document.getElementById('adminName').textContent = adminSession.username;
     document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
@@ -875,7 +887,6 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-GB', {
     weekday:'long', year:'numeric', month:'long', day:'numeric'
   });
-
   function showToast(msg, type = '') {
     const toast = document.getElementById('toast');
     toast.textContent = msg;
@@ -966,14 +977,12 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
   const panelUpload  = document.getElementById('panelUpload');
   const videoUrlInput  = document.getElementById('videoUrlInput');
   const videoFileInput = document.getElementById('videoFileInput');
-
   sourceToggle.querySelectorAll('.source-toggle-btn').forEach(btn => {
     btn.addEventListener('click', () => {
       sourceToggle.querySelectorAll('.source-toggle-btn').forEach(b => b.classList.remove('active'));
       btn.classList.add('active');
       const src = btn.dataset.source;
       sourceInput.value = src;
-
       if (src === 'upload') {
         panelUpload.classList.add('active');
         panelLink.classList.remove('active');
@@ -987,9 +996,107 @@ $dirWritable  = is_dir($uploadDir) && is_writable($uploadDir);
       }
     });
   });
-
-  // Default = Upload (already set in HTML)
+  // Default = Upload
   videoFileInput.setAttribute('required', 'required');
+
+  // ===== AJAX Upload with Progress =====
+  const form = document.getElementById('videoForm');
+  const progressWrap = document.getElementById('uploadProgress');
+  const progressFill = document.getElementById('progressFill');
+  const progressPercent = document.getElementById('progressPercent');
+  const progressStatus = document.getElementById('progressStatus');
+  const submitBtn = document.getElementById('submitBtn');
+
+  form.addEventListener('submit', function(e) {
+    e.preventDefault();
+
+    // Basic validation
+    const source = sourceInput.value;
+    if (source === 'upload' && (!videoFileInput.files || !videoFileInput.files[0])) {
+      showToast('Please select a video file', 'error-toast');
+      return;
+    }
+    if (source === 'link' && !videoUrlInput.value.trim()) {
+      showToast('Please paste a video link', 'error-toast');
+      return;
+    }
+
+    const formData = new FormData(form);
+
+    // Show progress UI
+    progressWrap.classList.add('active');
+    progressFill.style.width = '0%';
+    progressPercent.textContent = '0%';
+    progressStatus.textContent = 'Starting upload...';
+    submitBtn.disabled = true;
+    submitBtn.textContent = 'Uploading...';
+
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', window.location.href, true);
+    xhr.setRequestHeader('X-Requested-With', 'XMLHttpRequest');
+
+    // Progress event
+    xhr.upload.addEventListener('progress', function(e) {
+      if (e.lengthComputable) {
+        const percent = Math.round((e.loaded / e.total) * 100);
+        progressFill.style.width = percent + '%';
+        progressPercent.textContent = percent + '%';
+        if (percent < 100) {
+          progressStatus.textContent = 'Uploading... ' + formatBytes(e.loaded) + ' / ' + formatBytes(e.total);
+        } else {
+          progressStatus.textContent = 'Processing on server...';
+        }
+      }
+    });
+
+    xhr.onload = function() {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Register Guide Video';
+
+      if (xhr.status === 200) {
+        try {
+          const res = JSON.parse(xhr.responseText);
+          if (res.success) {
+            progressFill.style.width = '100%';
+            progressPercent.textContent = '100%';
+            progressStatus.textContent = 'Upload complete! Reloading...';
+            showToast(res.message || 'Saved successfully!');
+            setTimeout(() => {
+              window.location.reload();
+            }, 900);
+          } else {
+            progressWrap.classList.remove('active');
+            showToast(res.message || 'Something went wrong', 'error-toast');
+          }
+        } catch (err) {
+          // Fallback if not JSON (rare)
+          progressWrap.classList.remove('active');
+          showToast('Upload finished. Reloading...', '');
+          setTimeout(() => window.location.reload(), 800);
+        }
+      } else {
+        progressWrap.classList.remove('active');
+        showToast('Server error: ' + xhr.status, 'error-toast');
+      }
+    };
+
+    xhr.onerror = function() {
+      submitBtn.disabled = false;
+      submitBtn.textContent = 'Save Register Guide Video';
+      progressWrap.classList.remove('active');
+      showToast('Network error. Please try again.', 'error-toast');
+    };
+
+    xhr.send(formData);
+  });
+
+  function formatBytes(bytes) {
+    if (bytes === 0) return '0 B';
+    const k = 1024;
+    const sizes = ['B', 'KB', 'MB', 'GB'];
+    const i = Math.floor(Math.log(bytes) / Math.log(k));
+    return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i];
+  }
 
   document.getElementById('menuToggle')?.addEventListener('click', () => {
     document.getElementById('sidebar').classList.toggle('open');
