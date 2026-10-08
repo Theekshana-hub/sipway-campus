@@ -1407,9 +1407,7 @@
     const BADGE_POLL_INTERVAL_MS = 15000;
 
     const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
-    if (!adminSession || !adminSession.username) {
-      window.location.href = 'admin-login.html';
-    }
+ 
 
     document.getElementById('adminName').textContent = adminSession.username;
     document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
