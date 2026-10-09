@@ -179,26 +179,15 @@ if ($isLoggedIn) {
     }
     $stmt3->close();
 
-   
-$stmtPkg = $conn->prepare("
-    SELECT ap.id, ap.package_name, ap.package_type, p.package_name AS pkg_name
-    FROM activated_packages ap
-    LEFT JOIN packages p ON p.id = ap.package_id
-    WHERE ap.student_id = ? AND ap.status = 'active' AND ap.sessions_remaining > 0
-    LIMIT 1
-");
-$stmtPkg->bind_param("i", $studentId);
-$stmtPkg->execute();
-$resPkg = $stmtPkg->get_result();
-if ($rowPkg = $resPkg->fetch_assoc()) {
-    $hasActivePackage = true;
-    $activePackageSubject = $rowPkg['package_name'] ?: ($rowPkg['pkg_name'] ?? null);
-    $activePackageType = strtolower(trim($rowPkg['package_type'] ?? 'individual'));
-    if ($activePackageType !== 'group') {
-        $activePackageType = 'individual';
-    }
-}
-$stmtPkg->bind_param("i", $studentId);
+    // ★ FIXED: single package query (duplicate removed)
+    $stmtPkg = $conn->prepare("
+        SELECT ap.id, ap.package_name, ap.package_type, p.package_name AS pkg_name
+        FROM activated_packages ap
+        LEFT JOIN packages p ON p.id = ap.package_id
+        WHERE ap.student_id = ? AND ap.status = 'active' AND ap.sessions_remaining > 0
+        LIMIT 1
+    ");
+    $stmtPkg->bind_param("i", $studentId);
     $stmtPkg->execute();
     $resPkg = $stmtPkg->get_result();
     if ($rowPkg = $resPkg->fetch_assoc()) {
@@ -211,7 +200,13 @@ $stmtPkg->bind_param("i", $studentId);
     }
     $stmtPkg->close();
 }
-$activePackageSubjectJs = json_encode($activePackageSubject !== null && $activePackageSubject !== '' ? strtolower(trim($activePackageSubject)) : null);
+
+$activePackageSubjectJs = json_encode(
+    $activePackageSubject !== null && $activePackageSubject !== ''
+        ? strtolower(trim($activePackageSubject))
+        : null
+);
+$activePackageTypeJs = json_encode($activePackageType ?? null);
 
 $bookedSessionsForJs = array_map(function ($s) {
     return [
@@ -364,7 +359,7 @@ $conn->close();
   border-radius: 12px;
   font-weight: 600;
   font-size: 14px;
-  color: #ffffff;                 /* pure white */
+  color: #ffffff;
   cursor: pointer;
   transition: all .2s var(--ease);
 }
@@ -3092,7 +3087,7 @@ $conn->close();
   const STUDENT_LANGUAGE = <?php echo $studentLanguageJs; ?>;
   const HAS_ACTIVE_PACKAGE = <?php echo json_encode($hasActivePackage); ?>;
   const ACTIVE_PACKAGE_SUBJECT = <?php echo $activePackageSubjectJs; ?>;
-  const ACTIVE_PACKAGE_TYPE = <?php echo isset($activePackageTypeJs) ? $activePackageTypeJs : 'null'; ?>; // 'individual' | 'group' | null
+  const ACTIVE_PACKAGE_TYPE = <?php echo $activePackageTypeJs; ?>;
   const BOOKED_SESSIONS = <?php echo $bookedSessionsJs; ?>;
   const _nowLocal = new Date();
   const TODAY_STR = _nowLocal.getFullYear() + '-' +
@@ -3358,65 +3353,6 @@ function loadLanguages() {
       regLanguage.value = normalizeCode(li.dataset.value);
     }
 
-    function buildLangOption(lang, selectDefault){
-      const flagCode = resolveFlagCode(lang);
-      const codeNorm = normalizeCode(lang.code);
-
-      const li = document.createElement('li');
-      li.className = 'gp-lang-option' + (selectDefault ? ' selected' : '');
-      li.setAttribute('role', 'option');
-      li.setAttribute('aria-selected', selectDefault ? 'true' : 'false');
-      li.dataset.value = codeNorm;
-      li.dataset.flag  = flagCode;
-      li.dataset.label = lang.label;
-
-      li.innerHTML =
-        '<span class="gp-lang-option-left">' +
-          flagImgHtml(flagCode) +
-          '<span>' + lang.label + '</span>' +
-        '</span>' +
-        '<svg class="gp-lang-tick" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 6L9 17l-5-5"/></svg>';
-
-      li.addEventListener('click', () => {
-        selectLangOption(li);
-        closeLangDropdown();
-      });
-
-      return li;
-    }
-
-    function loadLanguages(){
-      fetch('get_languages.php')
-        .then(res => res.json())
-        .then(data => {
-          langOptions.innerHTML = '';
-
-          if (!data.success || !data.languages || data.languages.length === 0) {
-            langOptions.innerHTML = '<li class="gp-lang-option-loading">No languages found.</li>';
-            langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
-            regLanguage.value = 'en';
-            return;
-          }
-
-          const defaultLang =
-            data.languages.find(l => normalizeCode(l.code) === 'en') ||
-            data.languages[0];
-
-          data.languages.forEach(lang => {
-            const isDefault = normalizeCode(lang.code) === normalizeCode(defaultLang.code);
-            langOptions.appendChild(buildLangOption(lang, isDefault));
-          });
-
-          langCurrent.innerHTML = flagImgHtml(resolveFlagCode(defaultLang)) +
-                                  '<span>' + defaultLang.label + '</span>';
-          regLanguage.value = normalizeCode(defaultLang.code);
-        })
-        .catch(() => {
-          langOptions.innerHTML = '<li class="gp-lang-option-loading">Could not load languages.</li>';
-          langCurrent.innerHTML = flagImgHtml('GB') + '<span>English</span>';
-          regLanguage.value = 'en';
-        });
-    }
     loadLanguages();
 
     const loginEmail = document.getElementById('gpLoginEmail');
@@ -3577,8 +3513,12 @@ function loadLanguages() {
   function normalizeSubject(s){
     return String(s || '').trim().toLowerCase().replace(/\s+/g, ' ');
   }
+
+  // ★ FIXED: no active package → hide ALL slots
   function matchesActivePackageSubject(item){
-    if (!HAS_ACTIVE_PACKAGE || !ACTIVE_PACKAGE_SUBJECT) return true;
+    if (!IS_LOGGED_IN || !HAS_ACTIVE_PACKAGE || !ACTIVE_PACKAGE_SUBJECT) {
+      return false;
+    }
     const itemSubject = normalizeSubject(item.subject);
     const pkgSubject  = normalizeSubject(ACTIVE_PACKAGE_SUBJECT);
     if (!itemSubject) return false;
@@ -3647,7 +3587,7 @@ function loadLanguages() {
     if (!requireAuth()) return;
     if (!HAS_ACTIVE_PACKAGE && Number(isFree) !== 1) {
       alert('Package එකක් active නැති නිසා session එකක් book කරන්න බැහැ. කරුණාකර මුලින් package එකක් activate කරන්න.');
-      window.location.href = 'index.php';
+      window.location.href = 'packages.php';
       return;
     }
     const params = new URLSearchParams({
@@ -3842,6 +3782,13 @@ function loadLanguages() {
   async function loadLiveSessions(){
     const panel = document.getElementById('liveNowPanel');
     try {
+      // ★ FIXED: no package → hide Live Now completely
+      if (!IS_LOGGED_IN || !HAS_ACTIVE_PACKAGE) {
+        panel.style.display = 'none';
+        knownLiveSlotIds = new Set();
+        return;
+      }
+
       const res = await fetch('get_live_session.php');
       const data = await res.json();
       if (!data.success || !data.data || data.data.length === 0) {
@@ -3937,12 +3884,18 @@ function loadLanguages() {
 
     async function loadMonthAvailability(){
       datesWithSlots = new Set();
+
+      // ★ FIXED: no package → no dates with slots
+      if (!IS_LOGGED_IN || !HAS_ACTIVE_PACKAGE || !ACTIVE_PACKAGE_SUBJECT) {
+        renderCalendar();
+        return;
+      }
+
       try {
         const params = new URLSearchParams({ year: viewYear, month: viewMonth });
         if (STUDENT_LANGUAGE) params.set('lang', String(STUDENT_LANGUAGE).trim().toLowerCase());
-        if (HAS_ACTIVE_PACKAGE && ACTIVE_PACKAGE_SUBJECT) {
-          params.set('subject', String(ACTIVE_PACKAGE_SUBJECT).trim().toLowerCase());
-        }
+        params.set('subject', String(ACTIVE_PACKAGE_SUBJECT).trim().toLowerCase());
+
         const res = await fetch(`get_availability_month.php?${params.toString()}`);
         const data = await res.json();
         if (data.success && Array.isArray(data.dates)) {
@@ -4060,6 +4013,16 @@ function loadLanguages() {
       slotsTitleEl.textContent = label;
       slotsListEl.innerHTML = `<div class="cal-slots-empty">Loading...</div>`;
 
+      // ★ FIXED: no package → show message, do not fetch
+      if (!IS_LOGGED_IN || !HAS_ACTIVE_PACKAGE) {
+        slotsListEl.innerHTML = `
+          <div class="cal-slots-empty" style="padding:24px;text-align:center;line-height:1.6;">
+            Package එකක් activate කරන්නේ නැති නිසා availability නෑ.<br>
+            <a href="packages.php" style="color:#a855f7;font-weight:800;">Packages →</a> පිටුවට ගිහින් package එකක් activate කරන්න.
+          </div>`;
+        return;
+      }
+
       try {
         const params = new URLSearchParams({ date: dateStr });
         if (STUDENT_LANGUAGE) params.set('lang', String(STUDENT_LANGUAGE).trim().toLowerCase());
@@ -4111,6 +4074,9 @@ function loadLanguages() {
 
     async function refreshSelectedDateSlotsSilently(){
       if (!selectedDate) return;
+      // ★ FIXED: skip if no package
+      if (!IS_LOGGED_IN || !HAS_ACTIVE_PACKAGE) return;
+
       try {
         const params = new URLSearchParams({ date: selectedDate });
         if (STUDENT_LANGUAGE) params.set('lang', String(STUDENT_LANGUAGE).trim().toLowerCase());
