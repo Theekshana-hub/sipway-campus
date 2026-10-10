@@ -1,3 +1,11 @@
+<?php
+session_start();
+if (empty($_SESSION['admin_logged_in'])) {
+    header('Location: admin_login.php');
+    exit;
+}
+$adminName = $_SESSION['admin_name'] ?? 'Admin';
+?>
 <!DOCTYPE html>
 <html lang="si">
 <head>
@@ -368,7 +376,6 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>
       Practice Videos
     </a>
-  
     <a class="nav-item" href="admin_activated_packages.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="8" rx="1.5"/><rect x="3" y="13" width="8" height="8" rx="1.5"/><rect x="13" y="13" width="8" height="8" rx="1.5"/></svg>
       Student Activated Packages
@@ -379,13 +386,13 @@
       Student Packages
     </a>
     <a class="nav-item" href="admin_mobile_gate.php">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-    <rect x="5" y="2" width="14" height="20" rx="2"/>
-    <line x1="12" y1="18" x2="12.01" y2="18"/>
-  </svg>
-  Mobile Gate Logs
-</a>
-<a class="nav-item" href="admin_languages.php">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="5" y="2" width="14" height="20" rx="2"/>
+        <line x1="12" y1="18" x2="12.01" y2="18"/>
+      </svg>
+      Mobile Gate Logs
+    </a>
+    <a class="nav-item" href="admin_languages.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -393,8 +400,8 @@
       </svg>
       Languages
     </a>
-      <div class="nav-label">Vocabulary</div>
-       <a class="nav-item" href="admin_vocabulary_videos.php">
+    <div class="nav-label">Vocabulary</div>
+    <a class="nav-item" href="admin_vocabulary_videos.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
         <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
         <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
@@ -402,21 +409,19 @@
       </svg>
       Vocabulary Videos
     </a>
-
-<a class="nav-item" href="admin_activated_vocabulary_packages.php">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
-    <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
-    <path d="M8 7h8M8 11h6"/>
-  </svg>
-  Vocabulary Activations
-  <span class="badge-count" id="pendingVocabBadge" style="display:none;">0</span>
-</a>
-  <div class="nav-label">AI Videos</div>
+    <a class="nav-item" href="admin_activated_vocabulary_packages.php">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/>
+        <path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>
+        <path d="M8 7h8M8 11h6"/>
+      </svg>
+      Vocabulary Activations
+      <span class="badge-count" id="pendingVocabBadge" style="display:none;">0</span>
+    </a>
+    <div class="nav-label">AI Videos</div>
     <a class="nav-item" href="admin_activated_ai_video_packages.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>
       AI Video Activations
-     
     </a>
     <div class="nav-label">Lecturers</div>
     <a class="nav-item" href="teachers.php">
@@ -449,21 +454,21 @@
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M22 3H2l8 9.46V19l4 2v-8.54L22 3z"/></svg>
       Filter
     </a>
-        <div class="nav-label">Chat</div>
-<a class="nav-item" href="admin_chat.php">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-    <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
-  </svg>
-  Student Chat
-</a>
-      <div class="nav-label"> Register Video</div>
-<a class="nav-item" href="admin_register_video.php">
-  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-    <rect x="2" y="4" width="20" height="14" rx="2"/>
-    <path d="M10 9l5 3-5 3V9z"/>
-  </svg>
-  Register Video
-</a>
+    <div class="nav-label">Chat</div>
+    <a class="nav-item" href="admin_chat.php">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>
+      </svg>
+      Student Chat
+    </a>
+    <div class="nav-label">Register Video</div>
+    <a class="nav-item" href="admin_register_video.php">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <rect x="2" y="4" width="20" height="14" rx="2"/>
+        <path d="M10 9l5 3-5 3V9z"/>
+      </svg>
+      Register Video
+    </a>
   </nav>
   <div class="sidebar-foot">
     <button class="logout-btn" id="logoutBtn">
@@ -500,7 +505,7 @@
         Date range එකක් තෝරලා <strong>Accepted student bookings</strong> වලින් lecture hours + salary බලන්න.<br>
         <strong>Admin add කරපු slots ගන්නේ නැහැ</strong> — Student කෙනෙක් book කරලා <strong>Accepted</strong> වුණාම විතරක් count වෙනවා.<br>
         එකම time slot එකට කී දෙනෙක් book කළත් → <strong>එක වතාවක් විතරයි</strong> (30 min).<br>
-        <strong>Normal:</strong> 30 min = Rs. 500 &nbsp;|&nbsp; 
+        <strong>Normal:</strong> 30 min = Rs. 500 &nbsp;|&nbsp;
         <strong>Dilini Tharushika Kumari:</strong> 30 min = Rs. 300
       </p>
     </div>
@@ -665,17 +670,17 @@
 (function(){
   const BADGE_POLL_INTERVAL_MS = 15000;
 
-  // ========== SALARY RATES ==========
-  // IMPORTANT:
-  // - Only Accepted STUDENT BOOKINGS count (not admin-added availability slots)
-  // - Backend total_hours must be unique accepted time slots
-  // - 1 unique accepted slot = 30 minutes
-  // - Multiple students on same slot → still counts as 1 × 30 min
-  const HOURS_PER_SLOT = 0.5;
+  // ========== ADMIN (PHP session eken enawa) ==========
+  const ADMIN_NAME = <?php echo json_encode($adminName, JSON_UNESCAPED_UNICODE); ?>;
 
-  const NORMAL_SESSION_RATE = 500;   // Rs.500 per unique 30-min accepted slot
+  // ========== SALARY RATES ==========
+  // - Only Accepted STUDENT BOOKINGS count (not admin-added availability slots)
+  // - Backend total_hours = unique accepted time slots
+  // - 1 unique accepted slot = 30 minutes
+  const HOURS_PER_SLOT = 0.5;
+  const NORMAL_SESSION_RATE = 500;
   const SPECIAL_LECTURER_NAME = 'Dilini Tharushika Kumari';
-  const SPECIAL_SESSION_RATE = 300;  // Rs.300 per unique 30-min accepted slot
+  const SPECIAL_SESSION_RATE = 300;
 
   function getSessionRate(fullName) {
     if (!fullName) return NORMAL_SESSION_RATE;
@@ -686,11 +691,9 @@
     return NORMAL_SESSION_RATE;
   }
 
-  const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
- 
-  
-  document.getElementById('adminName').textContent = adminSession.username;
-  document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
+  // Header: admin name + date (crash wenne na)
+  document.getElementById('adminName').textContent = ADMIN_NAME;
+  document.getElementById('adminAvatar').textContent = (ADMIN_NAME || 'A').charAt(0).toUpperCase();
   document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-GB', {
     weekday:'long', year:'numeric', month:'long', day:'numeric'
   });
@@ -707,80 +710,29 @@
   }
 
   /* ================= Sidebar pending badges ================= */
-  async function updateBookingsBadge() {
+  async function updateBadge(url, badgeId, filterFn) {
     try {
-      const res = await fetch('get_bookings.php');
+      const res = await fetch(url, { credentials: 'same-origin' });
       const data = await res.json();
-      if (!data.success) return;
-      const pending = data.data.filter(b => (b.status || '').toLowerCase() === 'pending').length;
-      const badge = document.getElementById('pendingBookingsBadge');
+      if (!data || !data.success) return;
+      const pending = (data.data || []).filter(filterFn).length;
+      const badge = document.getElementById(badgeId);
+      if (!badge) return;
       if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
       else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
+    } catch (err) { /* badge fail unata page ekata kisi wadak naha */ }
   }
-  async function updateStudentsBadge() {
-    try {
-      const res = await fetch('get_students.php');
-      const data = await res.json();
-      if (!data.success) return;
-      const pending = (data.data || []).filter(s => (s.status || 'pending') === 'pending').length;
-      const badge = document.getElementById('pendingStudentsBadge');
-      if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-      else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
+
+  function refreshBadges() {
+    updateBadge('get_bookings.php', 'pendingBookingsBadge', b => (b.status || '').toLowerCase() === 'pending');
+    updateBadge('get_students.php', 'pendingStudentsBadge', s => (s.status || 'pending') === 'pending');
+    updateBadge('get_activations.php', 'pendingActivationsBadge', a => (a.status || 'pending') === 'pending');
+    updateBadge('get-teachers.php', 'pendingTeachersBadge', t => (t.status || 'pending') === 'pending');
+    updateBadge('admin_get_pending_availability.php?filter=all', 'pendingAvailabilityBadge', r => r.approval_status === 'pending');
+    updateBadge('get_support_requests.php', 'pendingBadge', r => r.status === 'pending');
   }
-  async function updateActivationsBadge() {
-    try {
-      const res = await fetch('get_activations.php');
-      const data = await res.json();
-      if (!data.success) return;
-      const pending = (data.data || []).filter(a => (a.status || 'pending') === 'pending').length;
-      const badge = document.getElementById('pendingActivationsBadge');
-      if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-      else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
-  }
-  async function updateTeachersBadge() {
-    try {
-      const res = await fetch('get-teachers.php');
-      const data = await res.json();
-      if (!data.success) return;
-      const pending = (data.data || []).filter(t => (t.status || 'pending') === 'pending').length;
-      const badge = document.getElementById('pendingTeachersBadge');
-      if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-      else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
-  }
-  async function updateAvailabilityBadge() {
-    try {
-      const res = await fetch('admin_get_pending_availability.php?filter=all');
-      const data = await res.json();
-      if (!data.success) return;
-      const pending = (data.data || []).filter(r => r.approval_status === 'pending').length;
-      const badge = document.getElementById('pendingAvailabilityBadge');
-      if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-      else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
-  }
-  async function updateSupportBadge() {
-    try {
-      const res = await fetch('get_support_requests.php');
-      const data = await res.json();
-      if (!data.success) return;
-      const pending = data.data.filter(r => r.status === 'pending').length;
-      const badge = document.getElementById('pendingBadge');
-      if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-      else { badge.style.display = 'none'; }
-    } catch (err) { console.error(err); }
-  }
-  updateBookingsBadge(); updateStudentsBadge(); updateActivationsBadge();
-  updateTeachersBadge(); updateAvailabilityBadge(); updateSupportBadge();
-  setInterval(updateBookingsBadge, BADGE_POLL_INTERVAL_MS);
-  setInterval(updateStudentsBadge, BADGE_POLL_INTERVAL_MS);
-  setInterval(updateActivationsBadge, BADGE_POLL_INTERVAL_MS);
-  setInterval(updateTeachersBadge, BADGE_POLL_INTERVAL_MS);
-  setInterval(updateAvailabilityBadge, BADGE_POLL_INTERVAL_MS);
-  setInterval(updateSupportBadge, BADGE_POLL_INTERVAL_MS);
+  refreshBadges();
+  setInterval(refreshBadges, BADGE_POLL_INTERVAL_MS);
 
   function pad(n){ return n < 10 ? '0' + n : '' + n; }
   function fmtDate(d){ return `${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`; }
@@ -834,8 +786,8 @@
           lecturer_id: id,
           full_name: l.full_name || 'Unknown',
           subjects: new Set(),
-          slot_count: 0,        // how many students booked (display only)
-          total_hours: 0,       // unique accepted time slots from backend (drives salary)
+          slot_count: 0,
+          total_hours: 0,
           details: []
         };
       }
@@ -859,7 +811,7 @@
 
   function monthKeyFromRaw(raw) {
     if (!raw) return 'unknown';
-    const d = new Date(raw);
+    const d = new Date(String(raw).replace(' ', 'T'));
     if (isNaN(d.getTime())) return 'unknown';
     return d.getFullYear() + '-' + pad(d.getMonth() + 1);
   }
@@ -896,6 +848,17 @@
     });
   }
 
+  async function safeJson(url) {
+    const res = await fetch(url, { credentials: 'same-origin' });
+    const text = await res.text();
+    try {
+      return JSON.parse(text);
+    } catch (e) {
+      console.error('JSON nemei response ekak awa (' + url + '):', text);
+      throw new Error('Invalid JSON from ' + url);
+    }
+  }
+
   async function applyFilter() {
     const startDate = startDateEl.value;
     const endDate = endDateEl.value;
@@ -910,10 +873,7 @@
     applyBtn.disabled = true;
     applyBtn.textContent = 'Loading...';
     try {
-      // This API MUST return only Accepted student bookings
-      // (not admin-added availability slots)
-      const res = await fetch(`get_filter_data.php?start_date=${startDate}&end_date=${endDate}`);
-      const data = await res.json();
+      const data = await safeJson(`get_filter_data.php?start_date=${startDate}&end_date=${endDate}`);
       if (!data.success) {
         showToast(data.message || 'Data load කරන්න බෑ උනා', 'error-toast');
         return;
@@ -923,8 +883,7 @@
 
       let normalPayments = [];
       try {
-        const payRes = await fetch(`get_student_payments.php?start_date=${startDate}&end_date=${endDate}`);
-        const payData = await payRes.json();
+        const payData = await safeJson(`get_student_payments.php?start_date=${startDate}&end_date=${endDate}`);
         normalPayments = payData.success ? (payData.data || []) : [];
       } catch (payErr) {
         console.error('get_student_payments.php fetch failed', payErr);
@@ -932,8 +891,7 @@
 
       let vocabPayments = [];
       try {
-        const vocabRes = await fetch(`get_vocabulary_payments.php?start_date=${startDate}&end_date=${endDate}`);
-        const vocabData = await vocabRes.json();
+        const vocabData = await safeJson(`get_vocabulary_payments.php?start_date=${startDate}&end_date=${endDate}`);
         vocabPayments = vocabData.success ? (vocabData.data || []) : [];
       } catch (vocabErr) {
         console.error('get_vocabulary_payments.php fetch failed', vocabErr);
@@ -949,7 +907,7 @@
       downloadBtn.disabled = false;
     } catch (err) {
       console.error(err);
-      showToast('Server connect උනේ නෑ', 'error-toast');
+      showToast('Server connect උනේ නෑ (F12 Console බලන්න)', 'error-toast');
     } finally {
       applyBtn.disabled = false;
       applyBtn.textContent = 'Apply Filter';
@@ -969,19 +927,13 @@
     const lecturerCount = lastGroupedLecturers.length;
     const studentCount = Array.isArray(data.students) ? data.students.length : (data.summary?.total_students ?? 0);
 
-    // ===== Core logic =====
-    // total_hours (from backend) = unique Accepted time slots only
-    // salary = unique slots × rate
-    // slot_count = number of students who booked (display only)
-    // Admin-added slots that nobody booked must NOT appear in total_hours
-
     let totalSalary = 0;
     let totalDisplayHours = 0;
     let totalStudentBookings = 0;
 
     lastGroupedLecturers.forEach(l => {
       const rate = getSessionRate(l.full_name);
-      const uniqueAcceptedSlots = l.total_hours;   // must come only from Accepted bookings
+      const uniqueAcceptedSlots = l.total_hours;
       totalSalary += uniqueAcceptedSlots * rate;
       totalDisplayHours += uniqueAcceptedSlots * HOURS_PER_SLOT;
       totalStudentBookings += l.slot_count;
@@ -1041,7 +993,7 @@
     } else {
       studentsBody.innerHTML = data.students.map(s => {
         const initials = (s.full_name || '?').charAt(0).toUpperCase();
-        const joined = new Date(s.created_at).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
+        const joined = new Date(String(s.created_at).replace(' ', 'T')).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' });
         return `<tr>
           <td>
             <div class="person-cell">
@@ -1075,7 +1027,7 @@
         const initials = (p.student_name || '?').charAt(0).toUpperCase();
         const remaining = parseInt(p.sessions_remaining) || 0;
         const remainingCls = remaining <= 2 ? 'sessions-badge low' : 'sessions-badge';
-        const purchased = p.purchased_on ? new Date(p.purchased_on).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '-';
+        const purchased = p.purchased_on ? new Date(String(p.purchased_on).replace(' ', 'T')).toLocaleDateString('en-GB', { day:'numeric', month:'short', year:'numeric' }) : '-';
         const typeBadge = p.type === 'vocabulary' ? '<span class="vocab-badge">VOCAB</span>' : '';
         return `<tr>
           <td>
@@ -1395,7 +1347,7 @@
 
     const filename = `Sipway_Filter_Report_${lastData.range.start}_to_${lastData.range.end}.xlsx`;
     XLSX.writeFile(wb, filename);
-    showToast(`Excel download උනා ✅`);
+    showToast('Excel download උනා ✅');
   });
 
   document.getElementById('tabButtons').addEventListener('click', (e) => {
@@ -1418,9 +1370,9 @@
     document.getElementById('sidebar').classList.remove('open');
     document.getElementById('sidebarBackdrop').classList.remove('show');
   });
-document.getElementById('logoutBtn')?.addEventListener('click', () => {
-  window.location.href = 'admin_logout.php';
-});
+  document.getElementById('logoutBtn')?.addEventListener('click', () => {
+    window.location.href = 'admin_logout.php';
+  });
 
   applyFilter();
 })();
