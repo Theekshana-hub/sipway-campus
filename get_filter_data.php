@@ -28,9 +28,7 @@ try {
     $conn = new mysqli('localhost', 'root', '', 'sipway');
     $conn->set_charset('utf8mb4');
 
-    // ---------- Lecturer hours (Accepted student bookings only) ----------
-    // slot_count  = how many students booked
-    // total_hours = unique (date + time) accepted slots  (1 slot = 30 min)
+ 
     $sql = "SELECT l.id, l.full_name, l.subject,
                    COUNT(b.id) AS slot_count,
                    COUNT(DISTINCT CONCAT(DATE(b.session_date), '|', IFNULL(TIME_FORMAT(b.session_time, '%H:%i'), ''))) AS total_hours
