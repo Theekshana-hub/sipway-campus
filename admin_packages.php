@@ -156,6 +156,7 @@
     box-shadow:0 8px 20px -6px rgba(214,108,71,0.5);
     transition:transform .15s var(--ease), box-shadow .15s var(--ease);
   }
+  .add-btn svg{ width:16px; height:16px; }
   .add-btn:hover{ transform:translateY(-1px); box-shadow:0 10px 24px -6px rgba(214,108,71,0.6); }
   .type-switch{
     display:inline-flex; gap:6px; background:var(--bg); padding:4px;
@@ -246,7 +247,7 @@
     display:flex; align-items:center; justify-content:center;
     cursor:pointer; transition:all .15s var(--ease); flex-shrink:0;
   }
-  .icon-btn svg{ width:15px; height:15px; }
+  .icon-btn svg{ width:15px; height:15px; pointer-events:none; }
   .icon-btn:active{ transform:scale(.92); }
   .btn-edit{ background:var(--navy-soft); color:var(--navy); }
   .btn-edit:hover{ background:#dfe7f0; }
@@ -304,12 +305,14 @@
   .toast{
     position:fixed; top:20px; left:50%; transform:translateX(-50%) translateY(-16px);
     background:var(--navy); color:#fff; padding:13px 22px; border-radius:10px;
-    font-size:13.5px; font-weight:600; opacity:0; transition:all .25s var(--ease); z-index:100;
+    font-size:13.5px; font-weight:600; opacity:0; transition:all .25s var(--ease); z-index:300;
     pointer-events:none;
   }
   .toast.show{ opacity:1; transform:translateX(-50%) translateY(0); }
   .toast.error-toast{ background:var(--danger); }
   .empty-state{ padding:40px 20px; text-align:center; color:var(--muted-2); font-size:13px; }
+  .empty-state.error{ color:var(--danger); }
+  .empty-state small{ display:block; margin-top:8px; color:var(--muted); word-break:break-all; }
   .sidebar-backdrop{
     display:none; position:fixed; inset:0; background:rgba(15,42,74,0.4); z-index:45;
   }
@@ -420,11 +423,10 @@
       Vocabulary Activations
       <span class="badge-count" id="pendingVocabBadge" style="display:none;">0</span>
     </a>
-      <div class="nav-label">AI Videos</div>
+    <div class="nav-label">AI Videos</div>
     <a class="nav-item" href="admin_activated_ai_video_packages.php">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M10 9l5 3-5 3V9z"/></svg>
       AI Video Activations
-     
     </a>
     <div class="nav-label">Lecturers</div>
     <a class="nav-item" href="teachers.php">
@@ -713,10 +715,17 @@ const endpoints = {
   }
 };
 
-const adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
+/* ---------- Admin session (safe: never crashes the page) ---------- */
+let adminSession = null;
+try {
+  adminSession = JSON.parse(localStorage.getItem('sipwayAdmin') || 'null');
+} catch (e) {
+  adminSession = null;
+}
+const adminUsername = (adminSession && adminSession.username) ? String(adminSession.username) : 'Admin';
 
-document.getElementById('adminName').textContent = adminSession.username;
-document.getElementById('adminAvatar').textContent = adminSession.username.charAt(0).toUpperCase();
+document.getElementById('adminName').textContent = adminUsername;
+document.getElementById('adminAvatar').textContent = adminUsername.charAt(0).toUpperCase();
 document.getElementById('todayDate').textContent = new Date().toLocaleDateString('en-GB', {
   weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
 });
@@ -744,6 +753,22 @@ function escapeHtml(str) {
 function getLangMeta(code) {
   const c = (code || 'en').toLowerCase();
   return LANG_OPTIONS[c] || { flag: '🌐', label: c };
+}
+
+/* Fetch JSON safely: shows the real server error instead of hanging */
+async function fetchJson(url, options = {}) {
+  const res = await fetch(url, Object.assign({ cache: 'no-store' }, options));
+  const raw = await res.text();
+  let data;
+  try {
+    data = JSON.parse(raw.replace(/^\uFEFF/, '').trim());
+  } catch (e) {
+    const err = new Error('Server eken JSON enne naha (HTTP ' + res.status + ')');
+    err.raw = raw;
+    err.status = res.status;
+    throw err;
+  }
+  return data;
 }
 
 function buildLangPicker(selected = 'en') {
@@ -844,17 +869,20 @@ async function loadPackages() {
   const tbody = document.getElementById('pkgBody');
   tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">Loading packages...</div></td></tr>`;
   try {
-    const res = await fetch(endpoints[packageType].list);
-    const data = await res.json();
+    const data = await fetchJson(endpoints[packageType].list);
     if (data.success) {
       allPackages = data.packages || [];
       applyFilters();
     } else {
-      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">Error: ${escapeHtml(data.message || 'Data load unuwe na')}</div></td></tr>`;
+      tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state error">Error: ${escapeHtml(data.message || 'Data load unuwe na')}</div></td></tr>`;
     }
   } catch (err) {
     console.error(err);
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state">Server connect unuwe na. API file check karanna.</div></td></tr>`;
+    const detail = err.raw ? `<small>${escapeHtml(String(err.raw).slice(0, 300))}</small>` : '';
+    const msg = err.raw !== undefined
+      ? escapeHtml(err.message)
+      : 'Server connect unuwe na. API file check karanna.';
+    tbody.innerHTML = `<tr><td colspan="8"><div class="empty-state error">${msg}${detail}</div></td></tr>`;
   }
 }
 
@@ -927,7 +955,7 @@ function renderTable(list) {
         <td style="${(isVocab || isAiVideo) ? 'display:none' : ''}">${p.total_sessions != null ? p.total_sessions : '—'}</td>
         <td>${durationCell}</td>
         <td>
-          <span class="status-badge status-${status}">${status}</span>
+          <span class="status-badge status-${escapeHtml(status)}">${escapeHtml(status)}</span>
           ${p.is_offer == 1 && !isAiVideo ? '<span class="offer-badge">OFFER</span>' : ''}
         </td>
         <td>
@@ -1030,8 +1058,7 @@ document.getElementById('pkgForm').onsubmit = async (e) => {
   saveBtn.disabled = true;
   saveBtn.textContent = 'Saving...';
   try {
-    const res = await fetch(endpoints[packageType].save, { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = await fetchJson(endpoints[packageType].save, { method: 'POST', body: formData });
     if (data.success) {
       showToast(editingId ? 'Package updated successfully!' : 'Package added successfully! ✅');
       modal.classList.remove('show');
@@ -1040,6 +1067,7 @@ document.getElementById('pkgForm').onsubmit = async (e) => {
       showToast(data.message || 'Failed', 'error-toast');
     }
   } catch (err) {
+    console.error(err, err.raw);
     showToast('Server error', 'error-toast');
   } finally {
     saveBtn.disabled = false;
@@ -1100,8 +1128,7 @@ confirmDeleteBtn.addEventListener('click', async () => {
   try {
     const formData = new FormData();
     formData.append('id', pendingDeleteId);
-    const res = await fetch(endpoints[packageType].del, { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = await fetchJson(endpoints[packageType].del, { method: 'POST', body: formData });
     if (data.success) {
       showToast('Package deleted successfully 🗑️');
       closeDeleteModal();
@@ -1110,6 +1137,7 @@ confirmDeleteBtn.addEventListener('click', async () => {
       showToast(data.message || 'Delete failed', 'error-toast');
     }
   } catch (err) {
+    console.error(err, err.raw);
     showToast('Delete failed', 'error-toast');
   } finally {
     confirmDeleteBtn.disabled = false;
@@ -1141,8 +1169,7 @@ async function toggleStatus(id, newStatus) {
   }
 
   try {
-    const res = await fetch(endpoints[packageType].save, { method: 'POST', body: formData });
-    const data = await res.json();
+    const data = await fetchJson(endpoints[packageType].save, { method: 'POST', body: formData });
     if (data.success) {
       showToast(newStatus === 'active' ? 'Package activate unuwa ✅' : 'Package deactivate unuwa');
       loadPackages();
@@ -1150,7 +1177,7 @@ async function toggleStatus(id, newStatus) {
       showToast(data.message || 'Status update karanna baa una', 'error-toast');
     }
   } catch (err) {
-    console.error(err);
+    console.error(err, err.raw);
     showToast('Server connect unuwe na', 'error-toast');
   }
 }
@@ -1168,72 +1195,54 @@ document.getElementById('pkgBody').addEventListener('click', (e) => {
   else if (action === 'deactivate') toggleStatus(id, 'inactive');
 });
 
-/* Badges */
+/* Badges (each one is isolated, a failure here never affects the page) */
+function setBadge(id, count) {
+  const badge = document.getElementById(id);
+  if (!badge) return;
+  if (count > 0) { badge.style.display = 'inline-block'; badge.textContent = count; }
+  else { badge.style.display = 'none'; }
+}
 async function updateBookingsBadge() {
   try {
-    const res = await fetch('get_bookings.php');
-    const data = await res.json();
+    const data = await fetchJson('get_bookings.php');
     if (!data.success) return;
-    const pending = data.data.filter(b => (b.status || '').toLowerCase() === 'pending').length;
-    const badge = document.getElementById('pendingBookingsBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingBookingsBadge', (data.data || []).filter(b => (b.status || '').toLowerCase() === 'pending').length);
+  } catch (err) { console.error('bookings badge', err); }
 }
 async function updateStudentsBadge() {
   try {
-    const res = await fetch('get_students.php');
-    const data = await res.json();
+    const data = await fetchJson('get_students.php');
     if (!data.success) return;
-    const pending = (data.data || []).filter(s => (s.status || 'pending') === 'pending').length;
-    const badge = document.getElementById('pendingStudentsBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingStudentsBadge', (data.data || []).filter(s => (s.status || 'pending') === 'pending').length);
+  } catch (err) { console.error('students badge', err); }
 }
 async function updateActivationsBadge() {
   try {
-    const res = await fetch('get_activations.php');
-    const data = await res.json();
+    const data = await fetchJson('get_activations.php');
     if (!data.success) return;
-    const pending = (data.data || []).filter(a => (a.status || 'pending') === 'pending').length;
-    const badge = document.getElementById('pendingActivationsBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingActivationsBadge', (data.data || []).filter(a => (a.status || 'pending') === 'pending').length);
+  } catch (err) { console.error('activations badge', err); }
 }
 async function updateTeachersBadge() {
   try {
-    const res = await fetch('get-teachers.php');
-    const data = await res.json();
+    const data = await fetchJson('get-teachers.php');
     if (!data.success) return;
-    const pending = (data.data || []).filter(t => (t.status || 'pending') === 'pending').length;
-    const badge = document.getElementById('pendingTeachersBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingTeachersBadge', (data.data || []).filter(t => (t.status || 'pending') === 'pending').length);
+  } catch (err) { console.error('teachers badge', err); }
 }
 async function updateAvailabilityBadge() {
   try {
-    const res = await fetch('admin_get_pending_availability.php?filter=all');
-    const data = await res.json();
+    const data = await fetchJson('admin_get_pending_availability.php?filter=all');
     if (!data.success) return;
-    const pending = (data.data || []).filter(r => r.approval_status === 'pending').length;
-    const badge = document.getElementById('pendingAvailabilityBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingAvailabilityBadge', (data.data || []).filter(r => r.approval_status === 'pending').length);
+  } catch (err) { console.error('availability badge', err); }
 }
 async function updateSupportBadge() {
   try {
-    const res = await fetch('get_support_requests.php');
-    const data = await res.json();
+    const data = await fetchJson('get_support_requests.php');
     if (!data.success) return;
-    const pending = data.data.filter(r => r.status === 'pending').length;
-    const badge = document.getElementById('pendingBadge');
-    if (pending > 0) { badge.style.display = 'inline-block'; badge.textContent = pending; }
-    else { badge.style.display = 'none'; }
-  } catch (err) { console.error(err); }
+    setBadge('pendingBadge', (data.data || []).filter(r => r.status === 'pending').length);
+  } catch (err) { console.error('support badge', err); }
 }
 
 document.getElementById('menuToggle').addEventListener('click', () => {
@@ -1245,12 +1254,15 @@ document.getElementById('sidebarBackdrop').addEventListener('click', () => {
   document.getElementById('sidebarBackdrop').classList.remove('show');
 });
 document.getElementById('logoutBtn')?.addEventListener('click', () => {
+  try { localStorage.removeItem('sipwayAdmin'); } catch (e) {}
   window.location.href = 'admin_logout.php';
 });
 
+/* Init: load packages FIRST so nothing else can block it */
 buildLangFilterPills();
 setTypeUI();
 loadPackages();
+
 updateBookingsBadge();
 updateStudentsBadge();
 updateActivationsBadge();
