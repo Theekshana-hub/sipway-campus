@@ -2,19 +2,13 @@
 
 session_start();
 
-// --- Mobile gate: figure out if we still need to ask -------------------
-// Previously this only checked $_SESSION['gate_mobile'], so the popup
-// popped up again every time the PHP session ended (new browser session,
-// browser closed, session cookie expired, etc). Now we also remember it
-// with a long-lived cookie, and we skip it completely for anyone who is
-// already logged in (we already have their mobile number from registration).
 
 $alreadyLoggedIn  = isset($_SESSION['student_id']);
 $hasMobileSession = !empty($_SESSION['gate_mobile']);
 $hasMobileCookie  = !empty($_COOKIE['gate_mobile']);
 $hasSkipped       = !empty($_SESSION['gate_mobile_skipped']) || !empty($_COOKIE['gate_mobile_skip']);
 
-// If the cookie survived but the session didn't, resync the session from it.
+
 if ($hasMobileCookie && !$hasMobileSession) {
     $_SESSION['gate_mobile'] = $_COOKIE['gate_mobile'];
     $hasMobileSession = true;
@@ -22,7 +16,7 @@ if ($hasMobileCookie && !$hasMobileSession) {
 
 $needsMobile = !$alreadyLoggedIn && !$hasMobileSession && !$hasSkipped;
 
-// AJAX: user clicked the "Cancel" button on the popup — don't ask again today
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['gate_skip'])) {
     $_SESSION['gate_mobile_skipped'] = true;
     setcookie('gate_mobile_skip', '1', time() + 86400, '/'); // 1 day
