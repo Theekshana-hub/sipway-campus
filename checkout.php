@@ -55,7 +55,7 @@ if (!$package) {
     exit;
 }
 
-// Build the label shown on the pkg-tag badge
+
 if ($packageType === 'vocabulary') {
     $pkgTagLabel = 'VOCABULARY PACKAGE';
 } else {
@@ -87,6 +87,8 @@ $conn->close();
   --pink: #ec4899;
   --success: #10b981;
   --success-soft: #d1fae5;
+  --danger: #ef4444;
+  --danger-soft: #fef2f2;
   --radius-lg: 20px;
   --radius-md: 14px;
   --radius-sm: 10px;
@@ -350,6 +352,105 @@ a { color: inherit; text-decoration: none; }
   color: var(--purple);
 }
 
+/* ===== Privacy Policy Agreement ===== */
+.agree-box {
+  margin-top: 22px;
+  padding: 14px 16px;
+  border: 2px solid var(--line);
+  border-radius: var(--radius-md);
+  background: var(--bg-soft);
+  transition: all .25s var(--ease);
+}
+.agree-box.checked {
+  border-color: var(--purple);
+  background: var(--purple-soft);
+}
+.agree-box.error {
+  border-color: var(--danger);
+  background: var(--danger-soft);
+  animation: shake .4s var(--ease);
+}
+@keyframes shake {
+  0%, 100% { transform: translateX(0); }
+  20% { transform: translateX(-6px); }
+  40% { transform: translateX(6px); }
+  60% { transform: translateX(-4px); }
+  80% { transform: translateX(4px); }
+}
+.agree-label {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  cursor: pointer;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--text);
+  font-weight: 500;
+  user-select: none;
+}
+.agree-label input {
+  position: absolute;
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.agree-check {
+  width: 22px;
+  height: 22px;
+  min-width: 22px;
+  border: 2px solid var(--muted);
+  border-radius: 7px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin-top: 1px;
+  transition: all .2s var(--ease);
+}
+.agree-check svg {
+  width: 14px;
+  height: 14px;
+  stroke: #fff;
+  stroke-width: 3.5;
+  fill: none;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  opacity: 0;
+  transform: scale(.5);
+  transition: all .2s var(--ease);
+}
+.agree-label input:checked + .agree-check {
+  background: linear-gradient(135deg, #a855f7, #ec4899);
+  border-color: transparent;
+  box-shadow: 0 4px 12px rgba(168,85,247,0.35);
+}
+.agree-label input:checked + .agree-check svg {
+  opacity: 1;
+  transform: scale(1);
+}
+.agree-label input:focus-visible + .agree-check {
+  outline: 3px solid rgba(124,58,237,0.35);
+  outline-offset: 2px;
+}
+.agree-label a {
+  color: var(--purple);
+  font-weight: 700;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+.agree-label a:hover { color: var(--pink); }
+.agree-error {
+  display: none;
+  align-items: center;
+  gap: 6px;
+  margin-top: 10px;
+  padding-left: 34px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--danger);
+}
+.agree-box.error .agree-error { display: flex; }
+
 .pay-btn {
   width: 100%;
   padding: 16px;
@@ -368,10 +469,16 @@ a { color: inherit; text-decoration: none; }
   gap: 10px;
   margin-top: 20px;
 }
-.pay-btn:hover {
+.pay-btn:hover:not(:disabled) {
   filter: brightness(1.08);
   transform: translateY(-2px);
   box-shadow: 0 12px 30px rgba(168,85,247,0.45);
+}
+.pay-btn:disabled {
+  background: #cbd5e1;
+  box-shadow: none;
+  cursor: not-allowed;
+  opacity: .8;
 }
 
 .security-footer {
@@ -408,7 +515,7 @@ a { color: inherit; text-decoration: none; }
 
   <div class="checkout-grid">
     <div>
-      <!-- Student Info -->
+      
       <div class="card-box">
         <div class="card-box-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
@@ -436,7 +543,7 @@ a { color: inherit; text-decoration: none; }
         </div>
       </div>
 
-      <!-- Payment Method -->
+      
       <div class="card-box">
         <div class="card-box-title">
           <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="1" y="4" width="22" height="16" rx="2" ry="2"/><line x1="1" y1="10" x2="23" y2="10"/></svg>
@@ -466,7 +573,7 @@ a { color: inherit; text-decoration: none; }
       </div>
     </div>
 
-    <!-- Order Summary Column -->
+   
     <div>
       <div class="summary-card">
         <div class="package-preview">
@@ -494,11 +601,32 @@ a { color: inherit; text-decoration: none; }
           <span class="total-amount">Rs. <?php echo number_format($package['price'], 2); ?></span>
         </div>
 
-        <form id="checkoutForm" method="GET" action="<?php echo $packageType === 'vocabulary' ? 'initiate-vocab-payment.php' : 'initiate-payment.php'; ?>">
+        <form id="checkoutForm" method="GET" action="<?php echo $packageType === 'vocabulary' ? 'initiate-vocab-payment.php' : 'initiate-payment.php'; ?>" novalidate>
           <input type="hidden" name="package_id" value="<?php echo (int)$package['id']; ?>">
           <input type="hidden" name="type" value="<?php echo htmlspecialchars($packageType); ?>">
+
           
-          <button type="submit" class="pay-btn" id="paySubmitBtn">
+          <div class="agree-box" id="agreeBox">
+            <label class="agree-label" for="agreePolicy">
+              <input type="checkbox" id="agreePolicy" name="agree_policy" value="1">
+              <span class="agree-check">
+                <svg viewBox="0 0 24 24"><polyline points="20 6 9 17 4 12"/></svg>
+              </span>
+              <span>
+                I have read and agree to the
+                <a href="privacy-policy.php" target="_blank" rel="noopener">Privacy Policy</a>
+                and
+                <a href="terms.php" target="_blank" rel="noopener">Terms &amp; Conditions</a>
+                of Sipway Campus.
+              </span>
+            </label>
+            <div class="agree-error" id="agreeError">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+              <span>Please accept the Privacy Policy to continue.</span>
+            </div>
+          </div>
+
+          <button type="submit" class="pay-btn" id="paySubmitBtn" disabled>
             <span>Proceed to Secure Payment &rarr;</span>
           </button>
         </form>
@@ -515,22 +643,53 @@ a { color: inherit; text-decoration: none; }
 <script>
 let currentMethod = 'card';
 
+const form        = document.getElementById('checkoutForm');
+const submitBtn   = document.getElementById('paySubmitBtn');
+const agreeInput  = document.getElementById('agreePolicy');
+const agreeBox    = document.getElementById('agreeBox');
+
+const URLS = {
+  cardUrl: '<?php echo $packageType === "vocabulary" ? "initiate-vocab-payment.php" : "initiate-payment.php"; ?>',
+  bankUrl: '<?php echo $packageType === "vocabulary" ? "upload-vocab-bank-receipt.php" : "upload-bank-receipt.php"; ?>'
+};
+
 function selectMethod(method) {
   currentMethod = method;
   document.getElementById('optCard').classList.toggle('selected', method === 'card');
   document.getElementById('optBank').classList.toggle('selected', method === 'bank');
-  
-  const submitBtn = document.getElementById('paySubmitBtn');
-  const form = document.getElementById('checkoutForm');
-  
+
   if (method === 'bank') {
     submitBtn.innerHTML = '<span>Upload Bank Deposit Slip &rarr;</span>';
-    form.action = '<?php echo $packageType === "vocabulary" ? "upload-vocab-bank-receipt.php" : "upload-bank-receipt.php"; ?>';
+    form.action = URLS.bankUrl;
   } else {
     submitBtn.innerHTML = '<span>Proceed to Secure Payment &rarr;</span>';
-    form.action = '<?php echo $packageType === "vocabulary" ? "initiate-vocab-payment.php" : "initiate-payment.php"; ?>';
+    form.action = URLS.cardUrl;
   }
 }
+
+
+agreeInput.addEventListener('change', function () {
+  submitBtn.disabled = !this.checked;
+  agreeBox.classList.toggle('checked', this.checked);
+  if (this.checked) agreeBox.classList.remove('error');
+});
+
+
+form.addEventListener('submit', function (e) {
+  if (!agreeInput.checked) {
+    e.preventDefault();
+    agreeBox.classList.remove('error');
+    void agreeBox.offsetWidth; 
+    agreeBox.classList.add('error');
+    agreeBox.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }
+});
+
+
+window.addEventListener('pageshow', function () {
+  submitBtn.disabled = !agreeInput.checked;
+  agreeBox.classList.toggle('checked', agreeInput.checked);
+});
 </script>
 
 </body>
